@@ -336,4 +336,22 @@ export interface Analytics {
   settled_auctions: number;
 }
 
+// ── Cursor Persistence ───────────────────────────────────────────────────────────
+// Persists the event indexer cursor so it resumes from the correct ledger after
+// restarts, preventing event loss or redundant reprocessing.
+
+export async function saveCursor(ledger: number): Promise<void> {
+  await pool.query(
+    `UPDATE cursor_state SET last_ledger = $1, updated_at = NOW() WHERE id = 1`,
+    [ledger]
+  );
+}
+
+export async function loadCursor(): Promise<number> {
+  const result = await pool.query(
+    "SELECT last_ledger FROM cursor_state WHERE id = 1"
+  );
+  return result.rows.length > 0 ? parseInt(result.rows[0].last_ledger, 10) : 0;
+}
+
 export { pool };
