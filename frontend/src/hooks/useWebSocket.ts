@@ -84,6 +84,8 @@ export interface AuctionCreatedEvent {
   metadata_uri: string;
 }
 
+// ── Hooks ───────────────────────────────────────────────────────────────────────
+
 export function useAuctionSocket(auctionId: number | null) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
