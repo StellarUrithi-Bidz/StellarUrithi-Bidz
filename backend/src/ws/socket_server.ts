@@ -70,7 +70,32 @@ export function initializeWebSocket(server: HttpServer): Server {
   io.on("connection", (socket: Socket) => {
     logger.info(`WS client connected: ${socket.id}`);
 
-    // Join auction room for live bid updates
+    // ── FIX #5: Authentication handler ──────────────────────────────────────
+    socket.on("authenticate", (payload: { address: string; signature: string; message: string }) => {
+      if (!payload?.address || !payload?.signature || !payload?.message) {
+        socket.emit("auth:error", { error: "Missing address, signature, or message" });
+        return;
+      }
+
+      if (!verifyStellarSignature(payload.address, payload.message, payload.signature)) {
+        socket.emit("auth:error", { error: "Invalid signature" });
+        logger.warn(`Auth failed for socket ${socket.id} claiming ${payload.address}`);
+        return;
+      }
+
+      // Store authenticated address
+      if (!authenticatedSockets.has(socket.id)) {
+        authenticatedSockets.set(socket.id, new Set());
+      }
+      authenticatedSockets.get(socket.id)!.add(payload.address);
+
+      socket.emit("auth:success", { address: payload.address });
+      logger.info(`Socket ${socket.id} authenticated as ${payload.address}`);
+    });
+
+    // ── Room join handlers ───────────────────────────────────────────────────
+
+    // Auction rooms are public — anyone can join to receive bid updates
     socket.on("join:auction", (auctionId: number) => {
       const room = `${AUCTION_ROOM_PREFIX}${auctionId}`;
       socket.join(room);
