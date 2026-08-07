@@ -1,28 +1,66 @@
-# Shared Dockerfile for StellarUrithi-Bidz Node.js services.
-# Used by backend, frontend, and custodian-portal.
-# Built via docker compose with build context set to each app directory.
+# StellarUrithi-Bidz Node.js Services — Multi-stage Dockerfile
+# ============================================================================
+# Uses multi-stage builds for smaller, more secure images.
+# Stage 1 (build): Install dependencies only — cached until package.json changes.
+# Stage 2 (run):  Copy built artifacts, run as non-root 'node' user.
 #
-# Build args:
-#   APP_DIR  — where to install the app inside the container (e.g., /app/backend)
+# Build:
+#   docker build -f Dockerfile.node
+#     --build-arg APP_DIR=/app/backend
+#     -t urithi-backend .
+#
+# Run:
+#   docker run -p 4000:4000 urithi-backend
 
-FROM node:20-alpine
+# ── Stage 1: Build ─────────────────────────────────────────────────────────────────
+FROM node:20-alpine AS build
 
 ARG APP_DIR=/app
 
 WORKDIR ${APP_DIR}
 
-# File polling for Docker bind mounts (chokidar + webpack watchpack)
+# File polling for Docker bind mounts (development only)
 ENV CHOKIDAR_USEPOLLING=true
 ENV WATCHPACK_POLLING=true
 
 # Install dependencies first (layer caching)
-# package*.json matches package.json and package-lock.json (if present)
 COPY package*.json ./
 
-RUN npm install --include=dev
+RUN npm ci --include=dev --prefer-offline --no-audit --no-fund
 
-# Copy remaining source (overridden by compose volumes in dev)
-COPY . .
+# ── Stage 2: Production Runtime ───────────────────────────────────────────────────
+FROM node:20-alpine AS runtime
 
-# Default command; overridden in docker-compose per service
+ARG APP_DIR=/app
+
+# Create non-root user & group early for layer caching
+RUN addgroup -g 1001 -S urithi && \
+    adduser -u 1001 -S urithi -G urithi
+
+WORKDIR ${APP_DIR}
+
+# Copy node_modules from build stage
+COPY --from=build --chown=urithi:urithi ${APP_DIR}/node_modules ./node_modules
+
+# Copy application source
+COPY --chown=urithi:urithi . .
+
+# Drop root privileges
+USER urithi
+
+# OCI labels (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
+LABEL org.opencontainers.image.title="StellarUrithi-Bidz"
+LABEL org.opencontainers.image.description="Auction protocol for African art on Stellar"
+LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.source="https://github.com/StellarUrithi-Bidz/StellarUrithi-Bidz"
+
+# Security: explicitly set Node.js to production for the runtime stage
+# (overridden in docker-compose for development)
+ENV NODE_ENV=production
+
+# Health check — override per service in docker-compose
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -qO- http://localhost:${PORT:-4000}/api/health || exit 1
+
+# Default command; overridden per service in docker-compose
 CMD ["npm", "run", "dev"]
