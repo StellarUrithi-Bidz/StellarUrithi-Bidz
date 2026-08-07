@@ -120,6 +120,17 @@ pub fn emit_auction_cancelled(env: &Env, auction_id: u64, seller: &Address) {
     env.events().publish(topics, ());
 }
 
+/// Emitted when an unrevealed sealed-bid is refunded after the reveal deadline.
+pub fn emit_unrevealed_refunded(
+    env: &Env,
+    auction_id: u64,
+    bidder: &Address,
+    amount: i128,
+) {
+    let topics = (symbol_short!("unrevealed_refunded"), auction_id, bidder.clone());
+    env.events().publish(topics, (amount,));
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────────
 
 fn format_to_symbol(format: AuctionFormat) -> Symbol {

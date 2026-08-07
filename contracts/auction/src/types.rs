@@ -116,6 +116,10 @@ pub struct Auction {
     pub commit_deadline: u64,
     /// Deadline after which reveals must be submitted.
     pub reveal_deadline: u64,
+    /// Maximum number of unique bidders allowed (prevents gas DoS).
+    pub max_bidders: u64,
+    /// Number of bidders who have committed so far.
+    pub bidder_count: u64,
     /// Revealed bids collected during reveal phase (winner selection).
     pub revealed_bids: Vec<SealedBidEntry>,
 
@@ -140,6 +144,8 @@ pub struct SealedBidEntry {
 pub struct BidCommitment {
     pub bidder: Address,
     pub commitment: BytesN<32>,
+    /// The escrowed bid amount (needed for refund_unrevealed).
+    pub amount: i128,
     pub timestamp: u64,
 }
 

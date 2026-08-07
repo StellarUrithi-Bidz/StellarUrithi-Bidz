@@ -124,6 +124,7 @@ impl UrithiAuction {
         // Sealed-bid-specific
         commit_deadline: u64,
         reveal_deadline: u64,
+        max_bidders: u64,
     ) -> u64 {
         seller.require_auth();
 
@@ -202,6 +203,8 @@ impl UrithiAuction {
             price_decay_per_second,
             commit_deadline,
             reveal_deadline,
+            max_bidders,
+            bidder_count: 0,
             revealed_bids: soroban_sdk::Vec::new(&env),
             attested: false,
         };
@@ -377,6 +380,12 @@ impl UrithiAuction {
         salt: BytesN<32>,
     ) {
         sealed_bid::reveal_bid(&env, auction_id, &bidder, bid_amount, salt);
+    }
+
+    /// Refund an unrevealed sealed bid after the reveal deadline.
+    /// Protects bidders who lost their salt or had connectivity issues.
+    pub fn refund_unrevealed(env: Env, auction_id: u64, bidder: Address) {
+        sealed_bid::refund_unrevealed(&env, auction_id, &bidder);
     }
 
     // =========================================================================

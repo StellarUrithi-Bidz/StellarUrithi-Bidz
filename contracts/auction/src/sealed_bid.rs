@@ -1,9 +1,16 @@
 //! Sealed-bid (commit-reveal) auction implementation.
 //!
 //! Two-phase auction:
-//! 1. **Commit phase**: Bidders submit a hash of (bid_amount + salt). Funds are locked.
+//! 1. **Commit phase**: Bidders submit a bound hash commitment of
+//!    SHA256(bid_amount || salt || auction_id || bidder). Funds are locked.
 //! 2. **Reveal phase**: Bidders reveal their bid and salt. Highest valid bid wins.
 //!    Losing bidders are refunded after winner determination.
+//!
+//! Bound commitment: binding the hash to auction_id + bidder prevents
+//! cross-auction replay and makes brute-force precomputation infeasible.
+//!
+//! Gas safety: `max_bidders` caps the number of unique bidders to prevent
+//! DoS via Vec reallocation in the reveal phase.
 
 use soroban_sdk::{Address, Bytes, BytesN, Env};
 
@@ -13,10 +20,14 @@ use crate::types::{
     Auction, AuctionFormat, AuctionStatus, BidCommitment, SealedBidEntry, StorageKey,
 };
 
-/// Submit a commitment hash during the commit phase.
+/// Submit a bound commitment hash during the commit phase.
 ///
-/// The commitment should be `SHA256(bid_amount || salt)` where `salt` is a
-/// random 32-byte value the bidder generates and keeps secret until reveal.
+/// The commitment is SHA256(bid_amount || salt || auction_id || bidder):
+/// - `bid_amount` (i128 big-endian) — the hidden bid
+/// - `salt` (BytesN<32>) — random 32-byte nonce for hiding
+/// - `auction_id` (u64 big-endian) — prevents cross-auction replay
+/// - `bidder` (Address bytes) — prevents cross-bidder precomputation
+///
 /// The full bid amount is escrowed at commit time to prevent griefing.
 pub fn commit_bid(
     env: &Env,
@@ -48,12 +59,21 @@ pub fn commit_bid(
         "Bid below reserve price"
     );
 
+    // Enforce max_bidders cap for gas safety
+    if auction.max_bidders > 0 {
+        assert!(
+            auction.bidder_count < auction.max_bidders,
+            "Maximum number of bidders reached"
+        );
+    }
+
     // Ensure bidder hasn't already committed
     let key = StorageKey::Commitment(auction_id, bidder.clone());
-    assert!(
-        env.storage().instance().get::<_, BidCommitment>(&key).is_none(),
-        "Bidder already committed"
-    );
+    let already_committed = env
+        .storage()
+        .instance()
+        .get::<_, BidCommitment>(&key)
+        .is_some();
 
     // ── Lock the full bid amount in escrow ──────────────────────────────────
     escrow::lock_bid(env, &auction.payment_token, bidder, bid_amount);
@@ -62,17 +82,26 @@ pub fn commit_bid(
     let commitment_record = BidCommitment {
         bidder: bidder.clone(),
         commitment,
+        amount: bid_amount,
         timestamp: now,
     };
     env.storage().instance().set(&key, &commitment_record);
+
+    // Increment bidder count (only for new bidders, not re-commits)
+    if !already_committed {
+        auction.bidder_count += 1;
+    }
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
 
     events::emit_commitment_stored(env, auction_id, bidder);
 }
 
 /// Reveal a bid during the reveal phase.
 ///
-/// The contract verifies `SHA256(bid_amount || salt) == stored_commitment`.
-/// Only valid reveals are recorded for winner determination.
+/// Verifies that SHA256(bid_amount || salt || auction_id || bidder)
+/// matches the stored commitment. Only valid reveals are recorded.
 pub fn reveal_bid(
     env: &Env,
     auction_id: u64,
@@ -109,10 +138,21 @@ pub fn reveal_bid(
         .get(&key)
         .unwrap_or_else(|| panic!("No commitment found for bidder"));
 
-    // Recompute commitment: SHA256(bid_amount || salt)
+    // ── Compute bound commitment ────────────────────────────────────────────
+    // SHA256(bid_amount || salt || auction_id || bidder)
     let mut preimage = Bytes::new(env);
+
+    // Append bid_amount as big-endian i128
     preimage.append(&bid_amount.to_be_bytes().into());
+
+    // Append the salt
     preimage.append(&salt.to_array().into());
+
+    // Append auction_id as big-endian u64
+    preimage.append(&auction_id.to_be_bytes().into());
+
+    // Append bidder address bytes (binds commitment to this specific bidder)
+    preimage.append(&bidder.to_bytes().into());
 
     let computed = env.crypto().sha256(&preimage);
     assert!(
@@ -146,11 +186,74 @@ pub fn reveal_bid(
     events::emit_bid_revealed(env, auction_id, bidder, bid_amount);
 }
 
+/// Refund a bidder who committed but did not reveal their bid.
+///
+/// Can be called by anyone after the reveal deadline passes.
+/// The committed funds are returned to the bidder. No penalty is applied.
+/// This protects bidders who lost their salt or had connectivity issues.
+pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
+    let mut auction: Auction = env
+        .storage()
+        .instance()
+        .get(&StorageKey::Auction(auction_id))
+        .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
+
+    assert!(
+        auction.format == AuctionFormat::SealedBid,
+        "Not a sealed-bid auction"
+    );
+
+    let now = env.ledger().timestamp();
+    assert!(
+        now >= auction.reveal_deadline,
+        "Reveal phase not yet ended — cannot refund before reveal deadline"
+    );
+
+    // Verify the bidder committed
+    let commit_key = StorageKey::Commitment(auction_id, bidder.clone());
+    let stored: BidCommitment = env
+        .storage()
+        .instance()
+        .get(&commit_key)
+        .unwrap_or_else(|| panic!("No commitment found for bidder"));
+
+    // Verify the bidder did NOT already reveal
+    let reveal_key = StorageKey::RevealedBid(auction_id, bidder.clone());
+    assert!(
+        env.storage()
+            .instance()
+            .get::<_, SealedBidEntry>(&reveal_key)
+            .is_none(),
+        "Bid already revealed — use finalize instead"
+    );
+
+    let refund_amount = stored.amount;
+
+    // Remove the commitment from storage
+    env.storage().instance().remove(&commit_key);
+
+    // Refund the locked bid amount
+    escrow::refund_bid(env, &auction.payment_token, bidder, refund_amount);
+
+    // Update bidder count so finalize still works correctly
+    if auction.bidder_count > 0 {
+        auction.bidder_count -= 1;
+    }
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
+
+    events::emit_unrevealed_refunded(env, auction_id, bidder, refund_amount);
+}
+
 /// Finalize a sealed-bid auction after the reveal phase ends.
 ///
 /// Determines the highest valid revealed bid as the winner.
-/// Refunds all losing bidders and marks the auction as Ended.
+/// Refunds all losing revealed bidders and marks the auction as Ended.
 /// Can be called by anyone after the reveal deadline.
+///
+/// Note: Bidders who committed but never revealed are NOT refunded here —
+/// they must call `refund_unrevealed` separately.
 pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
     let mut auction: Auction = env
         .storage()
@@ -184,7 +287,7 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
     let winner = highest_entry
         .unwrap_or_else(|| panic!("No valid bids revealed"));
 
-    // ── Refund all losing bidders ───────────────────────────────────────────
+    // ── Refund all losing revealed bidders ───────────────────────────────────
     for entry in auction.revealed_bids.iter() {
         if entry.bidder != winner.bidder {
             escrow::refund_bid(

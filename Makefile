@@ -307,7 +307,8 @@ demo: initialize
 		--start_price 0 \
 		--price_decay_per_second 0 \
 		--commit_deadline 0 \
-		--reveal_deadline 0; \
+		--reveal_deadline 0 \
+		--max_bidders 0; \
 	echo ""; \
 	echo "$(GREEN)✔ Demo auction created!$(RESET)"; \
 	echo "   Auction ID: 0"; \
