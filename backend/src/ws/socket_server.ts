@@ -125,12 +125,14 @@ export function initializeWebSocket(server: HttpServer): Server {
       socket.leave(room);
     });
 
+    // ── Cleanup on disconnect ───────────────────────────────────────────────
     socket.on("disconnect", () => {
+      authenticatedSockets.delete(socket.id);
       logger.debug(`WS client disconnected: ${socket.id}`);
     });
   });
 
-  logger.info("WebSocket server initialized");
+  logger.info("WebSocket server initialized with Stellar signature authentication");
   return io;
 }
 
