@@ -17,6 +17,7 @@ interface IndexerConfig {
   contractId: string;
   pollIntervalMs: number;
   batchSize: number;
+  maxRetries: number;
 }
 
 const config: IndexerConfig = {
