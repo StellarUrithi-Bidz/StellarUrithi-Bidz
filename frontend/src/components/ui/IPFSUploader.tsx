@@ -153,7 +153,6 @@ export default function IPFSUploader({
       const message = err instanceof Error ? err.message : "Upload failed";
       setError(message);
       toast.error(message);
-      setProgress(0);
     } finally {
       setUploading(false);
     }
