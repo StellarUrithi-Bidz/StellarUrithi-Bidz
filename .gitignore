@@ -6,6 +6,7 @@ dist/
 # Build artifacts
 contracts/target/
 *.wasm
+*.tsbuildinfo
 
 # Deployment artifacts
 .contract-id
