@@ -1,5 +1,8 @@
 // Custom hook for real-time WebSocket updates from the backend.
 // Uses a singleton socket connection shared across all hooks to prevent connection leaks.
+//
+// Updated: Support for Stellar Ed25519 signature authentication for bidder rooms.
+// Auction rooms remain public; bidder rooms require authentication.
 
 "use client";
 
