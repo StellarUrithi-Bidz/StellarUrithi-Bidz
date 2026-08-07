@@ -122,6 +122,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         isConnected,
         connectWallet,
         disconnectWallet,
+        signAuthMessage,
         network,
       }}
     >
