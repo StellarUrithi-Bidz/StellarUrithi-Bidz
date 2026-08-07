@@ -39,7 +39,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const checkConnection = async () => {
     try {
-      const connected = await isConnected();
+      const connected = await freighterIsConnected();
       if (connected && connected.isConnected) {
         const addr = await getAddress();
         if (addr && addr.address) {
