@@ -90,6 +90,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const signAuthMessage = useCallback(async (message: string): Promise<string> => {
+    try {
+      const result = await signMessage(message);
+      if (result?.signedMessage) {
+        // Freighter v3 returns a Buffer, v4 returns a base64 string.
+        // Always normalize to a base64 string for transport.
+        const sm = result.signedMessage;
+        if (typeof sm === "string") {
+          return sm;
+        }
+        // V3 Buffer — convert to base64
+        if (Buffer.isBuffer(sm)) {
+          return sm.toString("base64");
+        }
+        return String(sm);
+      }
+      throw new Error("No signedMessage returned from Freighter");
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Failed to sign message";
+      toast.error(errorMsg);
+      throw err;
+    }
+  }, []);
+
   return (
     <WalletContext.Provider
       value={{
