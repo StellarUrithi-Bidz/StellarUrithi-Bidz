@@ -155,21 +155,24 @@ export function broadcastNewBid(auctionId: number, bid: {
 export function broadcastBidRefunded(auctionId: number, bidder: string, amount: string): void {
   if (!io) return;
 
-  // Notify the auction room
   io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:bid_refunded", {
     auctionId,
     bidder,
     amount,
   });
 
-  // Notify the specific bidder
   io.to(`${BIDDER_ROOM_PREFIX}${bidder}`).emit("bidder:refunded", {
     auctionId,
     amount,
   });
 }
 
-export function broadcastAuctionClosed(auctionId: number, winner: string, winningBid: string, format: string): void {
+export function broadcastAuctionClosed(
+  auctionId: number,
+  winner: string,
+  winningBid: string,
+  format: string,
+): void {
   if (!io) return;
 
   io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:closed", {
