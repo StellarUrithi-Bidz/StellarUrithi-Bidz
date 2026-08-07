@@ -321,6 +321,13 @@ async function pollEvents(
       `Processed ${totalProcessed} events across ${batchCount} batch(es). Last ledger: ${lastLedger}`,
     );
   }
+
+  // Persist cursor so we resume from here after a restart
+  try {
+    await saveCursor(lastLedger);
+  } catch (err) {
+    logger.error("Failed to persist indexer cursor:", err);
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
