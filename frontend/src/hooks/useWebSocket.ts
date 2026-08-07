@@ -153,21 +153,62 @@ export function useAuctionSocket(auctionId: number | null) {
   return { isConnected, latestBid, auctionClosed, auctionSettled, clearLatestBid };
 }
 
-export function useBidderSocket(address: string | null) {
+export function useBidderSocket(
+  address: string | null,
+  authenticate = false,
+  signMessage?: (message: string) => Promise<string>,
+) {
   const [notification, setNotification] = useState<{
     type: string;
     auctionId: number;
     message: string;
   } | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  // Authenticate on connect if requested
+  useEffect(() => {
+    if (!address || !authenticate || !signMessage) return;
+
+    const socket = getSocket();
+
+    const doAuth = async () => {
+      if (socket.connected) {
+        const ok = await authenticateSocket(socket, address, signMessage);
+        setIsAuthenticated(ok);
+      }
+    };
+
+    const onConnect = () => {
+      doAuth();
+    };
+
+    if (socket.connected) {
+      doAuth();
+    }
+    socket.on("connect", onConnect);
+
+    // Listen for auth events
+    const onAuthSuccess = () => {
+      setIsAuthenticated(true);
+      cachedAuth = { address, socketId: socket.id! };
+      socket.emit("join:bidder", address);
+    };
+    const onAuthError = () => setIsAuthenticated(false);
+
+    socket.on("auth:success", onAuthSuccess);
+    socket.on("auth:error", onAuthError);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("auth:success", onAuthSuccess);
+      socket.off("auth:error", onAuthError);
+    };
+  }, [address, authenticate, signMessage]);
 
   useEffect(() => {
     if (!address) return;
 
     const socket = getSocket();
-
-    const onConnect = () => {
-      socket.emit("join:bidder", address);
-    };
 
     const onRefunded = (data: { auctionId: number; amount: string }) => {
       setNotification({
