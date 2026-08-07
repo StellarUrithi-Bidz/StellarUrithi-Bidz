@@ -191,23 +191,20 @@ pub fn reveal_bid(
         .get(&key)
         .unwrap_or_else(|| panic!("No commitment found for bidder"));
 
-    // ── Compute bound commitment ────────────────────────────────────────────
-    // SHA256(bid_amount || salt || auction_id || bidder)
-    let mut preimage = Bytes::new(env);
+    // ── Compute HMAC-SHA256 commitment ──────────────────────────────────────
+    // HMAC-SHA256(key = salt, message = bid_amount || auction_id || bidder)
+    let mut message = Bytes::new(env);
 
     // Append bid_amount as big-endian i128
-    preimage.append(&bid_amount.to_be_bytes().into());
-
-    // Append the salt
-    preimage.append(&salt.to_array().into());
+    message.append(&bid_amount.to_be_bytes().into());
 
     // Append auction_id as big-endian u64
-    preimage.append(&auction_id.to_be_bytes().into());
+    message.append(&auction_id.to_be_bytes().into());
 
     // Append bidder address bytes (binds commitment to this specific bidder)
-    preimage.append(&bidder.to_bytes().into());
+    message.append(&bidder.to_bytes().into());
 
-    let computed = env.crypto().sha256(&preimage);
+    let computed = hmac_sha256(env, &salt, &message);
     assert!(
         computed == stored.commitment,
         "Commitment verification failed"
