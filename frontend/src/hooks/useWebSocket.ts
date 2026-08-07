@@ -237,5 +237,5 @@ export function useBidderSocket(
 
   const clearNotification = useCallback(() => setNotification(null), []);
 
-  return { notification, clearNotification };
+  return { notification, clearNotification, isAuthenticated };
 }
