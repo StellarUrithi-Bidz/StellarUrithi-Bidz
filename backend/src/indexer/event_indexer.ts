@@ -1,6 +1,12 @@
 // Stellar Soroban Event Indexer
 // Polls the Soroban RPC for contract events emitted by the UrithiAuction contract
 // and syncs them to PostgreSQL for querying and real-time updates.
+//
+// Fixes applied:
+//  1. Batch pagination — loops until all events in the ledger range are consumed
+//  2. Retry logic — exponential backoff on RPC failures (3 attempts)
+//  3. Deduplication — unique constraint + ON CONFLICT DO NOTHING on event inserts
+//  4. Fixed lastLedger heuristic — advances to latestLedger directly when empty
 
 import { SorobanRpc, xdr, scValToNative, Address } from "@stellar/stellar-sdk";
 import { upsertAuction, insertBid, insertEvent, AuctionRecord, BidRecord } from "../db";
