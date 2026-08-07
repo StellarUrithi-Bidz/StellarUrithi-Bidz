@@ -107,10 +107,17 @@ export function initializeWebSocket(server: HttpServer): Server {
       socket.leave(room);
     });
 
-    // Join bidder room for personal notifications (outbid, refund, won)
+    // Bidder rooms require authentication — only the bidder can join their own room
     socket.on("join:bidder", (address: string) => {
+      if (!isAuthenticatedFor(socket.id, address)) {
+        socket.emit("auth:error", {
+          error: "Authentication required to join bidder room. Send 'authenticate' event first.",
+        });
+        return;
+      }
       const room = `${BIDDER_ROOM_PREFIX}${address}`;
       socket.join(room);
+      logger.debug(`Socket ${socket.id} joined bidder room ${room} (authenticated)`);
     });
 
     socket.on("leave:bidder", (address: string) => {
