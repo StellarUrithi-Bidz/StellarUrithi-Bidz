@@ -12,6 +12,7 @@ interface WalletContextType {
   isConnected: boolean;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => Promise<void>;
+  signAuthMessage: (message: string) => Promise<string>;
   network: string;
 }
 
