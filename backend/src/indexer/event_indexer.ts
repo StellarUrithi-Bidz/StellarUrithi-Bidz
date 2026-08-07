@@ -9,7 +9,7 @@
 //  4. Fixed lastLedger heuristic — advances to latestLedger directly when empty
 
 import { SorobanRpc, xdr, scValToNative, Address } from "@stellar/stellar-sdk";
-import { upsertAuction, insertBid, insertEvent, AuctionRecord, BidRecord } from "../db";
+import { upsertAuction, insertBid, insertEvent, saveCursor, loadCursor, AuctionRecord, BidRecord } from "../db";
 import { logger } from "../services/logger";
 
 interface IndexerConfig {
