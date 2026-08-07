@@ -155,9 +155,12 @@ export async function insertBid(bid: BidRecord): Promise<void> {
 }
 
 export async function insertEvent(event: EventRecord): Promise<void> {
+  // FIX #3: Deduplication — ON CONFLICT DO NOTHING prevents duplicate events
+  // when the indexer re-fetches the same ledger range (e.g., during pagination overlap).
   await pool.query(
     `INSERT INTO events (event_type, auction_id, data, ledger_sequence, tx_hash)
-     VALUES ($1, $2, $3, $4, $5)`,
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (ledger_sequence, event_type, auction_id) DO NOTHING`,
     [event.event_type, event.auction_id, JSON.stringify(event.data),
      event.ledger_sequence, event.tx_hash]
   );
