@@ -32,10 +32,17 @@ vi.mock("@stellar/stellar-sdk", () => ({
 }));
 
 // ── Mock database ────────────────────────────────────────────────────────────────
+const { mockSaveCursor, mockLoadCursor } = vi.hoisted(() => ({
+  mockSaveCursor: vi.fn().mockResolvedValue(undefined),
+  mockLoadCursor: vi.fn().mockResolvedValue(0),
+}));
+
 vi.mock("../db", () => ({
   upsertAuction: vi.fn().mockResolvedValue(undefined),
   insertBid: vi.fn().mockResolvedValue(undefined),
   insertEvent: vi.fn().mockResolvedValue(undefined),
+  saveCursor: mockSaveCursor,
+  loadCursor: mockLoadCursor,
 }));
 
 // ── Mock logger ──────────────────────────────────────────────────────────────────
