@@ -1,4 +1,6 @@
 // REST API routes for auctions and bid history.
+// Query parameters validated via Zod schemas for runtime type-safety.
+
 import { Router, Request, Response } from "express";
 import {
   getAuction,
@@ -7,19 +9,22 @@ import {
   getBidHistory,
   getAnalytics,
 } from "../db";
+import { validate } from "../middleware/validate";
+import { listAuctionsSchema, bidHistorySchema, auctionIdSchema } from "../schemas/auctions";
+import { strictRateLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
 
-// GET /api/auctions — List auctions with optional filters
+// GET /api — List auctions with optional filters
 // Query params: status, format, seller, limit, offset
-router.get("/", async (req: Request, res: Response) => {
+router.get("/", validate(listAuctionsSchema), async (req: Request, res: Response) => {
   try {
     const auctions = await getAuctions({
       status: req.query.status as string | undefined,
       format: req.query.format as string | undefined,
       seller: req.query.seller as string | undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+      limit: req.query.limit as number | undefined,
+      offset: req.query.offset as number | undefined,
     });
     res.json({ success: true, data: auctions });
   } catch (err) {
@@ -28,13 +33,13 @@ router.get("/", async (req: Request, res: Response) => {
 });
 
 // GET /api/bids — Get bid history for a bidder address (MUST come before /:id)
-// Query params: bidder, limit, offset
-router.get("/bids", async (req: Request, res: Response) => {
+// Require bidder param — validated as valid Stellar address
+router.get("/bids", validate(bidHistorySchema), async (req: Request, res: Response) => {
   try {
     const bids = await getBidHistory({
-      bidder: req.query.bidder as string | undefined,
-      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
-      offset: req.query.offset ? parseInt(req.query.offset as string, 10) : undefined,
+      bidder: req.query.bidder as string,
+      limit: req.query.limit as number | undefined,
+      offset: req.query.offset as number | undefined,
     });
     res.json({ success: true, data: bids });
   } catch (err) {
@@ -43,13 +48,10 @@ router.get("/bids", async (req: Request, res: Response) => {
 });
 
 // GET /api/:id — Get single auction detail
-router.get("/:id", async (req: Request, res: Response) => {
+// Validate id param via Zod
+router.get("/:id", validate(auctionIdSchema, "params"), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ success: false, error: "Invalid auction ID" });
-      return;
-    }
+    const { id } = req.params as unknown as { id: number };
     const auction = await getAuction(id);
     if (!auction) {
       res.status(404).json({ success: false, error: "Auction not found" });
@@ -62,13 +64,9 @@ router.get("/:id", async (req: Request, res: Response) => {
 });
 
 // GET /api/:id/bids — Get bid history for an auction
-router.get("/:id/bids", async (req: Request, res: Response) => {
+router.get("/:id/bids", validate(auctionIdSchema, "params"), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
-      res.status(400).json({ success: false, error: "Invalid auction ID" });
-      return;
-    }
+    const { id } = req.params as unknown as { id: number };
     const bids = await getBidsForAuction(id);
     res.json({ success: true, data: bids });
   } catch (err) {
