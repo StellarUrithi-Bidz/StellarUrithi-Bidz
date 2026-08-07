@@ -195,70 +195,138 @@ const handlers: Record<string, EventHandler> = {
 
 // ── Event Polling ─────────────────────────────────────────────────────────────────
 
-async function fetchEvents(rpc: SorobanRpc.Server): Promise<void> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchEventBatch(
+  rpc: SorobanRpc.Server,
+  startLedger: number,
+): Promise<any> {
+  return withRetry(
+    () =>
+      rpc.getEvents({
+        startLedger,
+        filters: [
+          {
+            type: "contract",
+            contractIds: [config.contractId],
+            topics: [["*", "*", "*"]],
+          },
+        ],
+        limit: config.batchSize,
+      }),
+    `getEvents(startLedger=${startLedger})`,
+  );
+}
+
+async function fetchLatestLedger(rpc: SorobanRpc.Server): Promise<number> {
+  const latest = await withRetry(
+    () => rpc.getLatestLedger(),
+    "getLatestLedger",
+  );
+  return latest.sequence;
+}
+
+/**
+ * Poll for events using a cursor-based pagination loop.
+ *
+ * FIX #1 (batch pagination): We loop until we receive fewer than batchSize events,
+ * meaning all events from startLedger up to the latest are consumed. If a full
+ * batch is returned, we continue from the highest ledger we processed to catch
+ * any remaining events at that same ledger.
+ *
+ * FIX #2 (retry): All RPC calls go through withRetry() with exponential backoff,
+ * up to maxRetries attempts.
+ *
+ * FIX #4 (lastLedger heuristic): When no events are found in the range, we
+ * advance lastLedger to latestLedger directly — not latestLedger - 10.
+ */
+async function pollEvents(
+  rpc: SorobanRpc.Server,
+  onEvent?: (eventType: string, auctionId: number, data: Record<string, unknown>) => void,
+): Promise<void> {
+  // Initialize cursor on first run
   if (lastLedger === 0) {
-    // Get latest ledger on first run
     try {
-      const latest = await rpc.getLatestLedger();
-      lastLedger = latest.sequence - 100; // Start 100 ledgers back for safety
+      const latestSeq = await fetchLatestLedger(rpc);
+      // Start 100 ledgers back to catch any events since last run
+      lastLedger = Math.max(0, latestSeq - 100);
+      logger.info(`Indexer initialized — starting from ledger ${lastLedger} (latest: ${latestSeq})`);
     } catch (err) {
       logger.warn("Could not fetch latest ledger, starting from 0");
       lastLedger = 0;
     }
+    return; // Wait for next poll cycle to fetch events
   }
 
-  try {
-    const response = await rpc.getEvents({
-      startLedger: lastLedger + 1,
-      filters: [
-        {
-          type: "contract",
-          contractIds: [config.contractId],
-          topics: [["*", "*", "*"]],
-        },
-      ],
-      limit: config.batchSize,
-    });
+  // Pagination loop: keep fetching until we exhaust all events in the range
+  let batchCount = 0;
+  let totalProcessed = 0;
+  let cursorLedger = lastLedger + 1;
 
-    if (!response.events || response.events.length === 0) {
-      // No new events; advance to latest
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    batchCount++;
+    const response = await fetchEventBatch(rpc, cursorLedger);
+
+    const events = response.events ?? [];
+
+    if (events.length === 0) {
+      // FIX #4: No more events in range — advance to latest ledger directly
       try {
-        const latest = await rpc.getLatestLedger();
-        lastLedger = Math.max(lastLedger, latest.sequence - 10);
+        const latestSeq = await fetchLatestLedger(rpc);
+        lastLedger = latestSeq;
       } catch {
-        // ignore
+        // If we can't fetch latest, don't advance (will retry next cycle)
       }
-      return;
+      break;
     }
 
-    for (const event of response.events) {
+    // Process each event in the batch
+    for (const event of events) {
       try {
-        await processEvent(event);
+        await processEvent(event, onEvent);
+        totalProcessed++;
       } catch (err) {
         logger.error(`Failed to process event at ledger ${event.ledger}:`, err);
       }
+      // Track the highest ledger we've processed
       lastLedger = Math.max(lastLedger, event.ledger);
     }
 
-    logger.debug(`Processed ${response.events.length} events. Last ledger: ${lastLedger}`);
-  } catch (err) {
-    logger.error("Failed to fetch events:", err);
+    // FIX #1: If we got a full batch, there may be more events at/after this ledger.
+    // Continue the loop using the last processed ledger as the new start point.
+    // Deduplication (FIX #3) will handle any overlap.
+    if (events.length < config.batchSize) {
+      break;
+    }
+
+    cursorLedger = lastLedger;
+    logger.debug(
+      `Batch ${batchCount}: ${events.length} events (full batch), continuing from ledger ${cursorLedger}`,
+    );
+  }
+
+  if (totalProcessed > 0) {
+    logger.info(
+      `Processed ${totalProcessed} events across ${batchCount} batch(es). Last ledger: ${lastLedger}`,
+    );
   }
 }
 
-async function processEvent(event: SorobanRpc.EventResponse): Promise<void> {
-  // Parse the Soroban event value
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SorobanEvent = any;
+
+async function processEvent(
+  event: SorobanEvent,
+  onEvent?: (eventType: string, auctionId: number, data: Record<string, unknown>) => void,
+): Promise<void> {
   const value = event.value;
 
-  // Extract topics — topic[0] is typically the event type symbol
-  // topic[1] is often the auction ID
   const topics = value.topics();
   if (topics.length < 2) return;
 
   const eventType = scValToNative(topics[0]) as string;
   const auctionId = parseInt(String(scValToNative(topics[1])) || "0", 10);
 
-  // Extract data payload
   const data = scValToNative(value.data());
 
   const handler = handlers[eventType];
