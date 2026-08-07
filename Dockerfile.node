@@ -1,0 +1,28 @@
+# Shared Dockerfile for StellarUrithi-Bidz Node.js services.
+# Used by backend, frontend, and custodian-portal.
+# Built via docker compose with build context set to each app directory.
+#
+# Build args:
+#   APP_DIR  — where to install the app inside the container (e.g., /app/backend)
+
+FROM node:20-alpine
+
+ARG APP_DIR=/app
+
+WORKDIR ${APP_DIR}
+
+# File polling for Docker bind mounts (chokidar + webpack watchpack)
+ENV CHOKIDAR_USEPOLLING=true
+ENV WATCHPACK_POLLING=true
+
+# Install dependencies first (layer caching)
+# package*.json matches package.json and package-lock.json (if present)
+COPY package*.json ./
+
+RUN npm install --include=dev
+
+# Copy remaining source (overridden by compose volumes in dev)
+COPY . .
+
+# Default command; overridden in docker-compose per service
+CMD ["npm", "run", "dev"]
