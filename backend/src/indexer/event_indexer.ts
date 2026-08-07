@@ -243,8 +243,19 @@ async function pollEvents(
   rpc: SorobanRpc.Server,
   onEvent?: (eventType: string, auctionId: number, data: Record<string, unknown>) => void,
 ): Promise<void> {
-  // Initialize cursor on first run
+  // Initialize cursor on first run — load persisted position from DB
   if (lastLedger === 0) {
+    try {
+      const persisted = await loadCursor();
+      if (persisted > 0) {
+        lastLedger = persisted;
+        logger.info(`Indexer resumed from persisted cursor — ledger ${lastLedger}`);
+        return;
+      }
+    } catch (err) {
+      logger.warn("Could not load persisted cursor, initializing from network");
+    }
+
     try {
       const latestSeq = await fetchLatestLedger(rpc);
       // Start 100 ledgers back to catch any events since last run
