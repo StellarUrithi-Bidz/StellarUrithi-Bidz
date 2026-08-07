@@ -1,4 +1,4 @@
-// Unit tests for the event indexer — batch pagination, retry, dedup, lastLedger.
+// Unit tests for the event indexer — batch pagination, retry, dedup, lastLedger, cursor persistence.
 // Tests core polling logic using properly mocked SorobanRpc responses.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -99,7 +99,6 @@ describe("Event Indexer — Configuration", () => {
 describe("Event Indexer — Retry Logic", () => {
   beforeEach(() => {
     process.env.CONTRACT_ID = "CD_MOCK";
-    // Simulate empty events for first poll + connect
     mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
     mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 2000 });
   });
@@ -112,7 +111,6 @@ describe("Event Indexer — Retry Logic", () => {
 
   it("should initialize lastLedger from getLatestLedger on first run", async () => {
     await startIndexer();
-    // On first run, indexer calls getLatestLedger and sets lastLedger = seq - 100
     expect(mockRpcInstance.getLatestLedger).toHaveBeenCalled();
     stopIndexer();
   });
@@ -124,9 +122,7 @@ describe("Event Indexer — Retry Logic", () => {
       .mockResolvedValueOnce({ sequence: 500 });
 
     await startIndexer();
-    // Wait for the retry with exponential backoff (1s delay)
     await new Promise((r) => setTimeout(r, 100));
-    // Should have been called at least once (initial + possibly retry)
     expect(mockRpcInstance.getLatestLedger).toHaveBeenCalled();
     stopIndexer();
   });
@@ -146,22 +142,16 @@ describe("Event Indexer — Batch Pagination", () => {
 
   it("should handle empty event list without crashing", async () => {
     mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 500 });
-
     await startIndexer();
     stopIndexer();
-    // Should not throw
   });
 
   it("should call getEvents with correct startLedger filter", async () => {
-    // Pre-set lastLedger so pollEvents enters the processing phase
     resetIndexerCursor(50);
     mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 1000 });
-
     await startIndexer();
-    // Wait for poll cycle to complete
     await new Promise((r) => setTimeout(r, 150));
     stopIndexer();
-
     expect(mockRpcInstance.getEvents).toHaveBeenCalled();
   });
 });
@@ -173,18 +163,16 @@ describe("Event Indexer — LastLedger Advancement", () => {
 
   afterEach(() => {
     stopIndexer();
+    resetIndexerCursor();
     vi.clearAllMocks();
   });
 
   it("should advance lastLedger to latestLedger when no events found", async () => {
     mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 1000 });
     mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 1000 });
-
     await startIndexer();
-    // Wait for async poll to complete
     await new Promise((r) => setTimeout(r, 100));
     stopIndexer();
-    // Indexer calls getLatestLedger for initialization
     expect(mockRpcInstance.getLatestLedger).toHaveBeenCalled();
   });
 
@@ -193,19 +181,14 @@ describe("Event Indexer — LastLedger Advancement", () => {
       createMockEvent(500, "bid_placed", 1, { bidder: "alice" }),
       createMockEvent(510, "bid_placed", 1, { bidder: "bob" }),
     ];
-
+    resetIndexerCursor(400);
     mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
     mockRpcInstance.getEvents
-      .mockResolvedValueOnce({
-        events: mockEventResponse(events),
-        latestLedger: 510,
-      })
+      .mockResolvedValueOnce({ events: mockEventResponse(events), latestLedger: 510 })
       .mockResolvedValueOnce({ events: [], latestLedger: 520 });
-
     await startIndexer();
+    await new Promise((r) => setTimeout(r, 150));
     stopIndexer();
-
-    // Events were processed — getEvents was called
     expect(mockRpcInstance.getEvents).toHaveBeenCalled();
   });
 });
@@ -217,31 +200,77 @@ describe("Event Indexer — Deduplication", () => {
 
   afterEach(() => {
     stopIndexer();
+    resetIndexerCursor();
     vi.clearAllMocks();
   });
 
   it("should handle overlapping batch re-fetches gracefully", async () => {
-    // Simulate: batch pagination causes overlap at same ledger
-    // Dedup happens at DB level (ON CONFLICT DO NOTHING)
     const events = [createMockEvent(500, "bid_placed", 1, { bidder: "alice" })];
-
+    resetIndexerCursor(400);
     mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
     mockRpcInstance.getEvents
-      .mockResolvedValueOnce({
-        events: mockEventResponse(events),
-        latestLedger: 500,
-      })
-      .mockResolvedValueOnce({
-        events: mockEventResponse(events), // same events again (overlap)
-        latestLedger: 500,
-      })
+      .mockResolvedValueOnce({ events: mockEventResponse(events), latestLedger: 500 })
+      .mockResolvedValueOnce({ events: mockEventResponse(events), latestLedger: 500 })
       .mockResolvedValueOnce({ events: [], latestLedger: 500 });
-
     await startIndexer();
+    await new Promise((r) => setTimeout(r, 150));
     stopIndexer();
-
-    // Should process without crashing — dedup prevents DB duplicates
     expect(mockRpcInstance.getEvents).toHaveBeenCalled();
+  });
+});
+
+describe("Event Indexer — Cursor Persistence", () => {
+  beforeEach(() => {
+    process.env.CONTRACT_ID = "CD_MOCK";
+    mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
+    mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 2000 });
+    resetIndexerCursor();
+    mockLoadCursor.mockReset().mockResolvedValue(0);
+  });
+
+  afterEach(() => {
+    stopIndexer();
+    resetIndexerCursor();
+    vi.clearAllMocks();
+  });
+
+  it("should load persisted cursor on startup", async () => {
+    mockLoadCursor.mockResolvedValue(0);
+    await startIndexer();
+    await new Promise((r) => setTimeout(r, 150));
+    stopIndexer();
+    expect(mockLoadCursor).toHaveBeenCalled();
+  });
+
+  it("should resume from persisted cursor if available", async () => {
+    mockLoadCursor.mockResolvedValue(1500);
+    mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
+    await startIndexer();
+    await new Promise((r) => setTimeout(r, 150));
+    stopIndexer();
+    expect(mockLoadCursor).toHaveBeenCalled();
+  });
+
+  it("should call saveCursor after pollEvents completes", async () => {
+    resetIndexerCursor(100);
+    mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
+    mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 2000 });
+    mockSaveCursor.mockReset().mockResolvedValue(undefined);
+    await startIndexer();
+    await new Promise((r) => setTimeout(r, 200));
+    stopIndexer();
+    expect(mockSaveCursor).toHaveBeenCalled();
+  });
+
+  it("should handle saveCursor failure without crashing the indexer", async () => {
+    resetIndexerCursor(100);
+    mockRpcInstance.getLatestLedger.mockResolvedValue({ sequence: 2000 });
+    mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 2000 });
+    mockSaveCursor.mockReset().mockRejectedValue(new Error("DB connection lost"));
+    await startIndexer();
+    await new Promise((r) => setTimeout(r, 200));
+    stopIndexer();
+    expect(mockSaveCursor).toHaveBeenCalled();
   });
 });
 
@@ -254,19 +283,15 @@ describe("Event Indexer — Lifecycle", () => {
 
   afterEach(() => {
     stopIndexer();
+    resetIndexerCursor();
     vi.clearAllMocks();
   });
 
   it("should not start a second indexer if already running", async () => {
     await startIndexer();
     const firstCallCount = mockRpcInstance.getLatestLedger.mock.calls.length;
-
-    // Second start should be a no-op (isRunning = true)
     await startIndexer();
     stopIndexer();
-
-    // Should not have called getLatestLedger again
-    // (The second startIndexer returns early because isRunning is true)
     expect(mockRpcInstance.getLatestLedger).toHaveBeenCalledTimes(firstCallCount);
   });
 });
