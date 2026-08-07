@@ -94,6 +94,17 @@ export async function initializeDatabase(): Promise<void> {
         ON events(ledger_sequence, event_type, auction_id);
       CREATE INDEX IF NOT EXISTS idx_events_auction_id ON events(auction_id);
       CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_events_ledger ON events(ledger_sequence);
+
+      CREATE TABLE IF NOT EXISTS cursor_state (
+        id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        last_ledger      BIGINT NOT NULL DEFAULT 0,
+        updated_at       TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      INSERT INTO cursor_state (id, last_ledger)
+      VALUES (1, 0)
+      ON CONFLICT (id) DO NOTHING;
     `);
 
     logger.info("Database tables initialized successfully");
