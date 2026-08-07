@@ -22,6 +22,37 @@ function getSocket(): Socket {
   return sharedSocket;
 }
 
+// ── Authentication helpers ─────────────────────────────────────────────────────
+
+/** Sign a challenge message using Freighter and authenticate the WebSocket */
+export async function authenticateSocket(
+  socket: Socket,
+  address: string,
+  signMessageFn: (message: string) => Promise<string>,
+): Promise<boolean> {
+  const message = `stellar-urithi-bidz-auth:${Date.now()}`;
+  try {
+    const signature = await signMessageFn(message);
+    return new Promise((resolve) => {
+      socket.emit("authenticate", { address, signature, message });
+      socket.once("auth:success", () => resolve(true));
+      socket.once("auth:error", () => resolve(false));
+      // Timeout after 10s
+      setTimeout(() => resolve(false), 10000);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Check if the socket is already authenticated for an address */
+let cachedAuth: { address: string; socketId: string } | null = null;
+export function isSocketAuthenticated(address: string): boolean {
+  return cachedAuth?.address === address && cachedAuth?.socketId === sharedSocket?.id;
+}
+
+// ── Event types ──────────────────────────────────────────────────────────────────
+
 export interface BidEvent {
   auctionId: number;
   bidder: string;
