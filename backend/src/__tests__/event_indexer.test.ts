@@ -106,6 +106,7 @@ describe("Event Indexer — Retry Logic", () => {
 
   afterEach(() => {
     stopIndexer();
+    resetIndexerCursor();
     vi.clearAllMocks();
   });
 
