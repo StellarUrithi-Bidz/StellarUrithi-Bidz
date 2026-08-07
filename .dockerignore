@@ -1,0 +1,13 @@
+**/node_modules
+**/.next
+**/dist
+**/target
+**/*.wasm
+**/.git
+**/.gitignore
+**/README.md
+**/.env
+**/.env.local
+**/npm-debug.log*
+.contract-id
+.deploy-log
