@@ -153,12 +153,15 @@ describe("Event Indexer — Batch Pagination", () => {
   });
 
   it("should call getEvents with correct startLedger filter", async () => {
+    // Pre-set lastLedger so pollEvents enters the processing phase
+    resetIndexerCursor(50);
     mockRpcInstance.getEvents.mockResolvedValue({ events: [], latestLedger: 1000 });
 
     await startIndexer();
+    // Wait for poll cycle to complete
+    await new Promise((r) => setTimeout(r, 150));
     stopIndexer();
-    // The indexer initializes and polls — at least getEvents was called
-    // (exact startLedger depends on initialization which is async)
+
     expect(mockRpcInstance.getEvents).toHaveBeenCalled();
   });
 });
