@@ -1,0 +1,16 @@
+[package]
+name = "stellar-urithi-auction"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Auction contract for StellarUrithi-Bidz: English, Dutch, and sealed-bid auctions with escrow and royalty splits"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
