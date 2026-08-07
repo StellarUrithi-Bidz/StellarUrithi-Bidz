@@ -17,6 +17,42 @@ let io: Server | null = null;
 const AUCTION_ROOM_PREFIX = "auction:";
 const BIDDER_ROOM_PREFIX = "bidder:";
 
+// ── Authentication ────────────────────────────────────────────────────────────────
+
+/** Per-socket state: authenticated addresses */
+const authenticatedSockets = new Map<string, Set<string>>();
+
+/**
+ * Verify a Stellar Ed25519 signature.
+ *
+ * The client signs a challenge message with Freighter's signMessage(),
+ * which returns the raw Ed25519 signature (Buffer in v3, base64 string in v4).
+ * The server verifies the signature against the expected challenge message.
+ */
+function verifyStellarSignature(
+  address: string,
+  message: string,
+  signedMessage: string,
+): boolean {
+  try {
+    const keypair = Keypair.fromPublicKey(address);
+    const signatureBytes = Buffer.from(signedMessage, "base64");
+    const messageBytes = Buffer.from(message, "utf-8");
+    return keypair.verify(messageBytes, signatureBytes);
+  } catch (err) {
+    logger.warn(`Signature verification failed for ${address}:`, err);
+    return false;
+  }
+}
+
+/**
+ * Check if a socket is authenticated for a given address.
+ */
+function isAuthenticatedFor(socketId: string, address: string): boolean {
+  const addrs = authenticatedSockets.get(socketId);
+  return addrs ? addrs.has(address) : false;
+}
+
 // ── Initialize ────────────────────────────────────────────────────────────────────
 
 export function initializeWebSocket(server: HttpServer): Server {
