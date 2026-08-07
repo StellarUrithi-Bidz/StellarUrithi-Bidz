@@ -55,7 +55,7 @@ vi.mock("../services/logger", () => ({
   },
 }));
 
-import { startIndexer, stopIndexer, getIndexerConfig } from "../indexer/event_indexer";
+import { startIndexer, stopIndexer, resetIndexerCursor, getIndexerConfig } from "../indexer/event_indexer";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 
