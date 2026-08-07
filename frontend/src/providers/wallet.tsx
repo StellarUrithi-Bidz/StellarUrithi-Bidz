@@ -78,7 +78,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnectWallet = useCallback(async () => {
     try {
-      await disconnect();
+      // Freighter v3: use setAllowed() to revoke access
+      await setAllowed();
       setAddress(null);
       setIsConnected(false);
       toast.success("Wallet disconnected");
