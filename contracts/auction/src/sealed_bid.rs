@@ -1,13 +1,15 @@
 //! Sealed-bid (commit-reveal) auction implementation.
 //!
 //! Two-phase auction:
-//! 1. **Commit phase**: Bidders submit a bound hash commitment of
-//!    SHA256(bid_amount || salt || auction_id || bidder). Funds are locked.
+//! 1. **Commit phase**: Bidders submit an HMAC-SHA256 commitment:
+//!    HMAC-SHA256(key = salt, message = bid_amount || auction_id || bidder).
+//!    Funds are locked. HMAC-SHA256 provides proper hiding — even with low-entropy
+//!    bid amounts, the secret salt protects against offline brute-force.
 //! 2. **Reveal phase**: Bidders reveal their bid and salt. Highest valid bid wins.
 //!    Losing bidders are refunded after winner determination.
 //!
-//! Bound commitment: binding the hash to auction_id + bidder prevents
-//! cross-auction replay and makes brute-force precomputation infeasible.
+//! Bound commitment: binding the message to auction_id + bidder prevents
+//! cross-auction replay and makes cross-bidder precomputation infeasible.
 //!
 //! Gas safety: `max_bidders` caps the number of unique bidders to prevent
 //! DoS via Vec reallocation in the reveal phase.
