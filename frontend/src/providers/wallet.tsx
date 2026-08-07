@@ -22,6 +22,7 @@ const WalletContext = createContext<WalletContextType>({
   isConnected: false,
   connectWallet: async () => {},
   disconnectWallet: async () => {},
+  signAuthMessage: async () => "",
   network: "testnet",
 });
 
