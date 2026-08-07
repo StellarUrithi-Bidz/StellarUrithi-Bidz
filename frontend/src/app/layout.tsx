@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { WalletProvider } from "@/providers/wallet";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 import { Toaster } from "react-hot-toast";
 import "./globals.css";
 
@@ -36,9 +37,11 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <body className="min-h-screen bg-slate-950 text-white flex flex-col">
         <WalletProvider>
+          <ErrorBoundary>
           <Navbar />
           <main className="flex-1">{children}</main>
           <Footer />
+          </ErrorBoundary>
           <Toaster
             position="bottom-right"
             toastOptions={{
