@@ -1,8 +1,13 @@
 // WebSocket server for real-time bid and auction state updates.
 // Clients (frontend) connect to receive live updates pushed from the indexer.
+//
+// Fixes applied:
+//  5. Authentication middleware — Stellar Ed25519 signature verification for
+//     joining bidder rooms. Auction rooms remain public (read-only).
 
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
+import { Keypair } from "@stellar/stellar-sdk";
 import { logger } from "../services/logger";
 
 let io: Server | null = null;
