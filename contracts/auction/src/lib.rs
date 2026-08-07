@@ -80,10 +80,11 @@ impl UrithiAuction {
             .set(&AuctionCount, &0u64);
 
         // Store platform wallet address — used for fee distribution.
-        // We store it separately from Config to keep Config compact.
+        // Uses StorageKey::PlatformWallet to avoid collision with other
+        // symbol_short! keys (previously used bare symbol_short!("platform_wallet")).
         env.storage()
             .instance()
-            .set(&symbol_short!("platform_wallet"), &platform_wallet);
+            .set(&StorageKey::PlatformWallet, &platform_wallet);
     }
 
     // =========================================================================
@@ -431,6 +432,13 @@ impl UrithiAuction {
     // =========================================================================
 
     /// Close an auction after the end time. Can be called by anyone.
+    ///
+    /// Auto-close mechanism: callable at any time without panicking.
+    /// - Before end_time: no-op (returns early, no state change).
+    /// - After end_time: closes the auction, determines winner.
+    ///
+    /// This allows a bot or cron job to periodically call close_auction on all
+    /// active auctions, ensuring expired auctions don't stay open indefinitely.
     /// For English auctions: records the highest bidder as winner.
     /// For sealed-bid auctions: delegates to finalize_sealed_auction.
     pub fn close_auction(env: Env, auction_id: u64) {
@@ -440,18 +448,27 @@ impl UrithiAuction {
             .get(&Auction(auction_id))
             .unwrap_or_else(|| panic!("Auction not found"));
 
-        // Already handled for Dutch (buy_now closes) and sealed-bid (finalize)
-        if auction.status == Ended || auction.status == Settled {
+        // Already handled
+        if auction.status == Ended || auction.status == Settled || auction.status == Cancelled {
             return;
         }
 
-        assert!(auction.status == Active, "Auction not active");
-
         let now = env.ledger().timestamp();
+
+        // Auto-close: if the auction hasn't ended yet, return silently.
+        // Callers (bots/cron) can safely call this on all active auctions
+        // without worrying about exact timing.
+        if now < auction.end_time {
+            return;
+        }
+
+        // Allow closing Created auctions that passed their end time with no activation
+        if auction.status != Active && auction.status != Created {
+            return;
+        }
 
         match auction.format {
             AuctionFormat::English => {
-                assert!(now >= auction.end_time, "Auction not yet ended");
                 if let Some(ref winner) = auction.highest_bidder.clone() {
                     auction.status = Ended;
                     events::emit_auction_closed(
@@ -468,14 +485,20 @@ impl UrithiAuction {
             }
             AuctionFormat::Dutch => {
                 // Dutch closes via buy_now; if it expires without a buy, cancel.
-                assert!(now >= auction.end_time, "Auction not yet ended");
                 auction.status = Cancelled;
                 events::emit_auction_cancelled(&env, auction_id, &auction.seller);
             }
             AuctionFormat::SealedBid => {
-                // Delegate to sealed-bid finalization
-                sealed_bid::finalize_sealed_auction(&env, auction_id);
-                return; // finalize handles its own storage updates
+                // Check if any bids were revealed before delegating.
+                // finalize_sealed_auction panics if no bids revealed — we handle
+                // that case here by cancelling the auction instead.
+                if auction.revealed_bids.is_empty() {
+                    auction.status = Cancelled;
+                    events::emit_auction_cancelled(&env, auction_id, &auction.seller);
+                } else {
+                    sealed_bid::finalize_sealed_auction(&env, auction_id);
+                    return; // finalize handles its own storage updates
+                }
             }
         }
 
@@ -534,7 +557,7 @@ impl UrithiAuction {
         let platform_wallet: Address = env
             .storage()
             .instance()
-            .get(&symbol_short!("platform_wallet"))
+            .get(&StorageKey::PlatformWallet)
             .unwrap_or_else(|| panic!("Platform wallet not configured"));
 
         // Calculate royalty split

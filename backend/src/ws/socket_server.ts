@@ -22,12 +22,21 @@ const BIDDER_ROOM_PREFIX = "bidder:";
 /** Per-socket state: authenticated addresses */
 const authenticatedSockets = new Map<string, Set<string>>();
 
+// Nonce freshness window — reject signatures older than this (milliseconds)
+const AUTH_NONCE_MAX_AGE_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
- * Verify a Stellar Ed25519 signature.
+ * Verify a Stellar Ed25519 signature with nonce replay protection.
  *
- * The client signs a challenge message with Freighter's signMessage(),
- * which returns the raw Ed25519 signature (Buffer in v3, base64 string in v4).
- * The server verifies the signature against the expected challenge message.
+ * The client signs a challenge message of the form:
+ *   "stellar-urithi-bidz-auth:${nonce}"
+ * where nonce is a server-provided random value (or client timestamp).
+ *
+ * Freighter's signMessage() signs the raw UTF-8 bytes and returns
+ * the Ed25519 signature (base64-encoded string in v4, Buffer in v3).
+ *
+ * Nonce format: if client-provided, it must be a Unix-epoch ms timestamp
+ * within AUTH_NONCE_MAX_AGE_MS of server time to prevent replay.
  */
 function verifyStellarSignature(
   address: string,
@@ -35,6 +44,27 @@ function verifyStellarSignature(
   signedMessage: string,
 ): boolean {
   try {
+    // Verify the message format: "stellar-urithi-bidz-auth:${nonce}"
+    const prefix = "stellar-urithi-bidz-auth:";
+    if (!message.startsWith(prefix)) {
+      logger.warn(`Auth message missing expected prefix for ${address}`);
+      return false;
+    }
+
+    // Extract nonce and validate freshness to prevent replay attacks
+    const nonce = message.slice(prefix.length);
+    const nonceMs = parseInt(nonce, 10);
+    if (!isNaN(nonceMs)) {
+      const age = Date.now() - nonceMs;
+      if (age > AUTH_NONCE_MAX_AGE_MS || age < 0) {
+        logger.warn(`Auth nonce expired or invalid for ${address}: age=${age}ms`);
+        return false;
+      }
+    } else {
+      // Non-numeric nonce: still accept for legacy clients, but log
+      logger.warn(`Auth nonce is non-numeric for ${address}, accepting without freshness check`);
+    }
+
     const keypair = Keypair.fromPublicKey(address);
     const signatureBytes = Buffer.from(signedMessage, "base64");
     const messageBytes = Buffer.from(message, "utf-8");

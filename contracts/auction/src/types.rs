@@ -60,6 +60,8 @@ pub enum StorageKey {
     AuctionCount,
     /// Platform configuration
     Config,
+    /// Platform fee wallet address (used for fee distribution on settlement)
+    PlatformWallet,
 }
 
 // ── Auction ───────────────────────────────────────────────────────────────────────

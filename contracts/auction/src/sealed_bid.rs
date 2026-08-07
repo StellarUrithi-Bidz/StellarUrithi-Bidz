@@ -120,13 +120,19 @@ pub fn commit_bid(
         );
     }
 
-    // Ensure bidder hasn't already committed
+    // ── Re-commit prevention ────────────────────────────────────────────────
+    // A bidder must not commit twice — doing so would lock additional funds
+    // without refunding the first escrow. Bidders who want to change their bid
+    // must call refund_unrevealed (after reveal deadline) and then commit again
+    // on a NEW auction, or reveal their original commitment.
     let key = StorageKey::Commitment(auction_id, bidder.clone());
-    let already_committed = env
-        .storage()
-        .instance()
-        .get::<_, BidCommitment>(&key)
-        .is_some();
+    assert!(
+        env.storage()
+            .instance()
+            .get::<_, BidCommitment>(&key)
+            .is_none(),
+        "Bidder has already committed to this auction"
+    );
 
     // ── Lock the full bid amount in escrow ──────────────────────────────────
     escrow::lock_bid(env, &auction.payment_token, bidder, bid_amount);
@@ -140,10 +146,8 @@ pub fn commit_bid(
     };
     env.storage().instance().set(&key, &commitment_record);
 
-    // Increment bidder count (only for new bidders, not re-commits)
-    if !already_committed {
-        auction.bidder_count += 1;
-    }
+    // Increment bidder count
+    auction.bidder_count += 1;
     env.storage()
         .instance()
         .set(&StorageKey::Auction(auction_id), &auction);
