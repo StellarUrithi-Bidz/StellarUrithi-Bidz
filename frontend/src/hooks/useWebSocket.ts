@@ -226,15 +226,10 @@ export function useBidderSocket(
       });
     };
 
-    if (socket.connected) {
-      onConnect();
-    }
-    socket.on("connect", onConnect);
     socket.on("bidder:refunded", onRefunded);
     socket.on("bidder:won", onWon);
 
     return () => {
-      socket.off("connect", onConnect);
       socket.off("bidder:refunded", onRefunded);
       socket.off("bidder:won", onWon);
     };
