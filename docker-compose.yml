@@ -1,0 +1,195 @@
+# StellarUrithi-Bidz — Full Stack Docker Compose
+# ============================================================================
+# One-command local development:
+#   docker compose up --build
+#
+# Services:
+#   postgres          PostgreSQL 16 — auction state, bid history, events
+#   backend           Node.js + Express — event indexer, WebSocket, REST API
+#   frontend          Next.js 14 — main auction UI (port 3000)
+#   custodian-portal  Next.js — physical-item attestation (port 3001)
+#
+# Ports:
+#   :3000  Frontend
+#   :3001  Custodian Portal
+#   :4000  Backend API / WebSocket
+#   :5432  PostgreSQL
+#
+# Env vars (set in .env or export before running):
+#   CONTRACT_ID   — deployed auction contract address
+#   PINATA_JWT    — Pinata API JWT for IPFS uploads
+
+version: "3.9"
+
+# ── Services ────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: urithi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stellar_urithi_bidz
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persistent data — survives container restarts
+      - pgdata:/var/lib/postgresql/data
+      # Schema init — runs only on first start
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stellar_urithi_bidz"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 20s
+    networks:
+      - urithi-network
+
+  # ── Backend (Indexer + API + WebSocket) ───────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../Dockerfile.node
+      args:
+        APP_DIR: /app/backend
+    container_name: urithi-backend
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    environment:
+      # Server
+      PORT: "4000"
+      NODE_ENV: development
+      # PostgreSQL (matches postgres service)
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: stellar_urithi_bidz
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      # Stellar
+      STELLAR_RPC_URL: https://soroban-testnet.stellar.org
+      CONTRACT_ID: ${CONTRACT_ID:-}
+      # Frontend CORS
+      FRONTEND_URL: http://localhost:3000
+      # Indexer
+      POLL_INTERVAL_MS: "5000"
+      LOG_LEVEL: debug
+      # File watching in Docker (tsx/chokidar)
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      # Mount source for hot reload (tsx watch)
+      - ./backend/src:/app/backend/src:ro
+      - ./backend/package.json:/app/backend/package.json:ro
+      - ./backend/tsconfig.json:/app/backend/tsconfig.json:ro
+      # Preserve container's node_modules (host bind mounts shadow them)
+      - /app/backend/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - urithi-network
+
+  # ── Frontend (Next.js Main App) ───────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.node
+      args:
+        APP_DIR: /app/frontend
+    container_name: urithi-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      # Stellar
+      NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-}
+      NEXT_PUBLIC_STELLAR_NETWORK: testnet
+      # Backend API — client-side (browser → host → backend container)
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_WS_URL: http://localhost:4000
+      # Backend API — server-side (Next.js SSR → backend container via Docker DNS)
+      API_URL_INTERNAL: http://backend:4000
+      # Pinata IPFS
+      PINATA_JWT: ${PINATA_JWT:-}
+      NEXT_PUBLIC_PINATA_GATEWAY: https://gateway.pinata.cloud
+      # File polling in Docker (Next.js webpack watchpack)
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      # Mount source for hot reload (Next.js dev mode)
+      - ./frontend/src:/app/frontend/src:ro
+      - ./frontend/public:/app/frontend/public:ro
+      - ./frontend/package.json:/app/frontend/package.json:ro
+      - ./frontend/tsconfig.json:/app/frontend/tsconfig.json:ro
+      - ./frontend/next.config.js:/app/frontend/next.config.js:ro
+      - ./frontend/tailwind.config.ts:/app/frontend/tailwind.config.ts:ro
+      - ./frontend/postcss.config.js:/app/frontend/postcss.config.js:ro
+      # Preserve container's node_modules
+      - /app/frontend/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - urithi-network
+
+  # ── Custodian Portal (Next.js Admin App) ──────────────────────────────────────────
+  custodian-portal:
+    build:
+      context: ./custodian-portal
+      dockerfile: ../Dockerfile.node
+      args:
+        APP_DIR: /app/custodian-portal
+    container_name: urithi-custodian
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: development
+      # Stellar
+      NEXT_PUBLIC_CONTRACT_ID: ${CONTRACT_ID:-}
+      NEXT_PUBLIC_STELLAR_NETWORK: testnet
+      # Pinata IPFS
+      PINATA_JWT: ${PINATA_JWT:-}
+      NEXT_PUBLIC_PINATA_GATEWAY: https://gateway.pinata.cloud
+      # File polling in Docker
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    volumes:
+      - ./custodian-portal/src:/app/custodian-portal/src:ro
+      - ./custodian-portal/public:/app/custodian-portal/public:ro
+      - ./custodian-portal/package.json:/app/custodian-portal/package.json:ro
+      - ./custodian-portal/tsconfig.json:/app/custodian-portal/tsconfig.json:ro
+      - ./custodian-portal/next.config.js:/app/custodian-portal/next.config.js:ro
+      - ./custodian-portal/tailwind.config.ts:/app/custodian-portal/tailwind.config.ts:ro
+      - ./custodian-portal/postcss.config.js:/app/custodian-portal/postcss.config.js:ro
+      # Preserve container's node_modules
+      - /app/custodian-portal/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - urithi-network
+
+# ── Volumes ────────────────────────────────────────────────────────────────────────
+
+volumes:
+  pgdata:
+    driver: local
+
+# ── Networks ───────────────────────────────────────────────────────────────────────
+
+networks:
+  urithi-network:
+    driver: bridge
