@@ -120,6 +120,17 @@ pub fn emit_auction_cancelled(env: &Env, auction_id: u64, seller: &Address) {
     env.events().publish(topics, ());
 }
 
+/// Emitted when the seller approves the auction contract to transfer the NFT.
+pub fn emit_nft_approved(
+    env: &Env,
+    auction_id: u64,
+    nft_contract: &Address,
+    token_id: u64,
+) {
+    let topics = (symbol_short!("nft_approved"), auction_id);
+    env.events().publish(topics, (nft_contract.clone(), token_id));
+}
+
 /// Emitted when an unrevealed sealed-bid is refunded after the reveal deadline.
 pub fn emit_unrevealed_refunded(
     env: &Env,
