@@ -334,23 +334,46 @@ async function processEvent(
     const txHash = event.txHash?.toXDR?.() || undefined;
     await handler(auctionId, data as Record<string, unknown>, event.ledger, txHash);
   }
+
+  // Notify WebSocket broadcaster
+  if (onEvent) {
+    onEvent(eventType, auctionId, data as Record<string, unknown>);
+  }
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────────
 
-export async function startIndexer(onEvent?: (eventType: string, auctionId: number, data: Record<string, unknown>) => void): Promise<void> {
+export async function startIndexer(
+  onEvent?: (eventType: string, auctionId: number, data: Record<string, unknown>) => void,
+): Promise<void> {
   if (isRunning) return;
   isRunning = true;
 
   const rpc = new SorobanRpc.Server(config.rpcUrl);
 
-  logger.info(`Starting event indexer — RPC: ${config.rpcUrl}, Contract: ${config.contractId}`);
+  logger.info(
+    `Starting event indexer — RPC: ${config.rpcUrl}, Contract: ${config.contractId}, ` +
+    `Poll: ${config.pollIntervalMs}ms, Batch: ${config.batchSize}, Retries: ${config.maxRetries}`,
+  );
 
-  // Poll for events
+  let polling = false;
+
   const poll = async () => {
     if (!isRunning) return;
-    await fetchEvents(rpc);
-    setTimeout(poll, config.pollIntervalMs);
+    // Prevent overlapping poll cycles
+    if (polling) {
+      setTimeout(poll, config.pollIntervalMs);
+      return;
+    }
+    polling = true;
+    try {
+      await pollEvents(rpc, onEvent);
+    } catch (err) {
+      logger.error("Poll cycle failed:", err);
+    } finally {
+      polling = false;
+      setTimeout(poll, config.pollIntervalMs);
+    }
   };
 
   poll();
