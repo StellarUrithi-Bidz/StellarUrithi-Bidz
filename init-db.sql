@@ -83,3 +83,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedup
 CREATE INDEX IF NOT EXISTS idx_events_auction_id ON events(auction_id);
 CREATE INDEX IF NOT EXISTS idx_events_type       ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_ledger     ON events(ledger_sequence);
+
+-- Cursor state table — persists indexer position across restarts
+-- Single-row table: insert the initial row, then UPDATE only
+CREATE TABLE IF NOT EXISTS cursor_state (
+    id               INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    last_ledger      BIGINT NOT NULL DEFAULT 0,
+    updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure the singleton row exists
+INSERT INTO cursor_state (id, last_ledger)
+VALUES (1, 0)
+ON CONFLICT (id) DO NOTHING;
