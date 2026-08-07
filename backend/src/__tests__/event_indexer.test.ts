@@ -140,6 +140,7 @@ describe("Event Indexer — Batch Pagination", () => {
 
   afterEach(() => {
     stopIndexer();
+    resetIndexerCursor();
     vi.clearAllMocks();
   });
 
