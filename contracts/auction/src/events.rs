@@ -1,5 +1,6 @@
 //! Event emission helpers for StellarUrithi-Bidz.
 //! All events follow Soroban best practices: lightweight topics + rich data payload.
+//! Event symbols are capped at 9 characters (symbol_short! limit in soroban-sdk v22).
 
 use soroban_sdk::{symbol_short, Address, Env, String, Symbol};
 
@@ -15,15 +16,11 @@ pub fn emit_auction_created(
     end_time: u64,
     metadata_uri: &String,
 ) {
-    let topics = (
-        symbol_short!("auction_created"),
-        auction_id,
-        seller.clone(),
-    );
+    let topics = (symbol_short!("auc_new"), auction_id, seller.clone());
     let format_symbol = match format {
         AuctionFormat::English => symbol_short!("english"),
         AuctionFormat::Dutch => symbol_short!("dutch"),
-        AuctionFormat::SealedBid => symbol_short!("sealed_bid"),
+        AuctionFormat::SealedBid => symbol_short!("sealed"),
     };
     env.events().publish(
         topics,
@@ -33,18 +30,10 @@ pub fn emit_auction_created(
 
 /// Emitted when a bid is placed (English auction) or a buy occurs (Dutch).
 pub fn emit_bid_placed(env: &Env, record: &BidRecord) {
-    let topics = (
-        symbol_short!("bid_placed"),
-        record.auction_id,
-        record.bidder.clone(),
-    );
+    let topics = (symbol_short!("bid_new"), record.auction_id, record.bidder.clone());
     env.events().publish(
         topics,
-        (
-            record.amount,
-            record.timestamp,
-            format_to_symbol(record.format.clone()),
-        ),
+        (record.amount, record.timestamp, format_to_symbol(record.format.clone())),
     );
 }
 
@@ -55,17 +44,13 @@ pub fn emit_bid_refunded(
     bidder: &Address,
     amount: i128,
 ) {
-    let topics = (symbol_short!("bid_refunded"), auction_id, bidder.clone());
+    let topics = (symbol_short!("bid_ref"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }
 
 /// Emitted when a sealed bid commitment is accepted.
-pub fn emit_commitment_stored(
-    env: &Env,
-    auction_id: u64,
-    bidder: &Address,
-) {
-    let topics = (symbol_short!("commitment_stored"), auction_id, bidder.clone());
+pub fn emit_commitment_stored(env: &Env, auction_id: u64, bidder: &Address) {
+    let topics = (symbol_short!("cmt_stor"), auction_id, bidder.clone());
     env.events().publish(topics, ());
 }
 
@@ -76,7 +61,7 @@ pub fn emit_bid_revealed(
     bidder: &Address,
     amount: i128,
 ) {
-    let topics = (symbol_short!("bid_revealed"), auction_id, bidder.clone());
+    let topics = (symbol_short!("bid_rev"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }
 
@@ -88,7 +73,7 @@ pub fn emit_auction_closed(
     winning_bid: i128,
     format: &AuctionFormat,
 ) {
-    let topics = (symbol_short!("auction_closed"), auction_id, winner.clone());
+    let topics = (symbol_short!("auc_end"), auction_id, winner.clone());
     env.events().publish(topics, (winning_bid, format_to_symbol(format.clone())));
 }
 
@@ -100,7 +85,7 @@ pub fn emit_auction_settled(
     royalty_amount: i128,
     platform_fee: i128,
 ) {
-    let topics = (symbol_short!("auction_settled"), auction_id);
+    let topics = (symbol_short!("auc_set"), auction_id);
     env.events().publish(topics, (seller_proceeds, royalty_amount, platform_fee));
 }
 
@@ -110,13 +95,13 @@ pub fn emit_attestation_recorded(
     auction_id: u64,
     custodian: &Address,
 ) {
-    let topics = (symbol_short!("attestation_recorded"), auction_id, custodian.clone());
+    let topics = (symbol_short!("att_rec"), auction_id, custodian.clone());
     env.events().publish(topics, ());
 }
 
 /// Emitted when an auction is cancelled.
 pub fn emit_auction_cancelled(env: &Env, auction_id: u64, seller: &Address) {
-    let topics = (symbol_short!("auction_cancelled"), auction_id, seller.clone());
+    let topics = (symbol_short!("auc_cxl"), auction_id, seller.clone());
     env.events().publish(topics, ());
 }
 
@@ -127,7 +112,7 @@ pub fn emit_nft_approved(
     nft_contract: &Address,
     token_id: u64,
 ) {
-    let topics = (symbol_short!("nft_approved"), auction_id);
+    let topics = (symbol_short!("nft_appr"), auction_id);
     env.events().publish(topics, (nft_contract.clone(), token_id));
 }
 
@@ -138,7 +123,7 @@ pub fn emit_unrevealed_refunded(
     bidder: &Address,
     amount: i128,
 ) {
-    let topics = (symbol_short!("unrevealed_refunded"), auction_id, bidder.clone());
+    let topics = (symbol_short!("urv_ref"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }
 
@@ -148,6 +133,6 @@ fn format_to_symbol(format: AuctionFormat) -> Symbol {
     match format {
         AuctionFormat::English => symbol_short!("english"),
         AuctionFormat::Dutch => symbol_short!("dutch"),
-        AuctionFormat::SealedBid => symbol_short!("sealed_bid"),
+        AuctionFormat::SealedBid => symbol_short!("sealed"),
     }
 }

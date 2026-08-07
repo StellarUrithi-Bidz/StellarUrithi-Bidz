@@ -1,5 +1,6 @@
 //! Shared types, storage keys, and data structures for StellarUrithi-Bidz auctions.
 //! Supports English (ascending), Dutch (descending), and Sealed-Bid auction formats.
+//! Compatible with soroban-sdk v22 — uses tuple enum variants and struct params.
 
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
@@ -36,13 +37,35 @@ pub enum AuctionStatus {
 
 // ── Item Type ────────────────────────────────────────────────────────────────────
 
+/// Digital NFT item details.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DigitalItem {
+    /// SEP-41 NFT contract address.
+    pub nft_contract: Address,
+    /// Token ID within the NFT contract.
+    pub token_id: u64,
+}
+
+/// Physical item with custodian attestation details.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PhysicalItem {
+    /// Custodian address responsible for physical custody.
+    pub custodian: Address,
+    /// SHA-256 hash of the attestation document (stored on IPFS).
+    pub attestation_hash: BytesN<32>,
+}
+
+/// The type of item being auctioned.
+/// Uses tuple variants for soroban-sdk v22 compatibility (no named enum fields).
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ItemType {
     /// A Stellar SEP-41 NFT token (on-chain asset).
-    Digital { nft_contract: Address, token_id: u64 },
+    Digital(DigitalItem),
     /// A physical item requiring custodian attestation.
-    Physical { custodian: Address, attestation_hash: BytesN<32> },
+    Physical(PhysicalItem),
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────────
@@ -62,6 +85,34 @@ pub enum StorageKey {
     Config,
     /// Platform fee wallet address (used for fee distribution on settlement)
     PlatformWallet,
+}
+
+// ── Create Auction Params ─────────────────────────────────────────────────────────
+
+/// Parameters for creating a new auction.
+/// Bundled into a struct to stay within soroban-sdk's 10-parameter contract function limit.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreateAuctionParams {
+    pub seller: Address,
+    pub original_creator: Address,
+    pub format: AuctionFormat,
+    pub item: ItemType,
+    pub payment_token: Address,
+    pub reserve_price: i128,
+    pub royalty_bps: u32,
+    pub start_time: u64,
+    pub end_time: u64,
+    pub metadata_uri: String,
+    // English-specific
+    pub min_increment: i128,
+    // Dutch-specific
+    pub start_price: i128,
+    pub price_decay_per_second: i128,
+    // Sealed-bid-specific
+    pub commit_deadline: u64,
+    pub reveal_deadline: u64,
+    pub max_bidders: u64,
 }
 
 // ── Auction ───────────────────────────────────────────────────────────────────────
