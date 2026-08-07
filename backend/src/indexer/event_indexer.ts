@@ -75,7 +75,7 @@ const handlers: Record<string, EventHandler> = {
       original_creator: (data.original_creator as string) || "",
       format: mapFormat(data.format as string),
       status: "created",
-      item_type: (data.item_type as string) || "digital",
+      item_type: ((data.item_type as string) || "digital") as "digital" | "physical",
       nft_contract: (data.nft_contract as string) || undefined,
       token_id: (data.token_id as number) || undefined,
       custodian: (data.custodian as string) || undefined,
