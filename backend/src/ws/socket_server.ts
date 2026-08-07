@@ -182,7 +182,6 @@ export function broadcastAuctionClosed(
     format,
   });
 
-  // Notify winner
   io.to(`${BIDDER_ROOM_PREFIX}${winner}`).emit("bidder:won", {
     auctionId,
     winningBid,
