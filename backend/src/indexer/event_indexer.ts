@@ -120,7 +120,6 @@ const handlers: Record<string, EventHandler> = {
       is_winning: true,
     };
 
-    // Mark previous bids for this auction as not winning
     await insertBid(bid);
     logger.info(`Bid placed: ${bid.amount} by ${bid.bidder} on auction ${auctionId}`);
 
