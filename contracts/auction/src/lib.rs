@@ -327,6 +327,44 @@ impl UrithiAuction {
         events::emit_auction_cancelled(&env, auction_id, &auction.seller);
     }
 
+    /// Approve the auction contract to transfer a digital NFT on the seller's behalf.
+    ///
+    /// Required before `settle_auction` can transfer the NFT to the winner.
+    /// The seller must call this after creating the auction but before settlement.
+    /// The approval grants the contract the right to transfer exactly 1 unit of the NFT.
+    ///
+    /// Panics if the auction doesn't have a digital item or is already settled.
+    pub fn approve_nft_transfer(env: Env, auction_id: u64) {
+        let auction: Auction = env
+            .storage()
+            .instance()
+            .get(&Auction(auction_id))
+            .unwrap_or_else(|| panic!("Auction not found"));
+
+        auction.seller.require_auth();
+
+        let (nft_contract, token_id) = match &auction.item {
+            ItemType::Digital { nft_contract, token_id } => (nft_contract.clone(), *token_id),
+            ItemType::Physical { .. } => panic!("Cannot approve physical item as NFT"),
+        };
+
+        assert!(
+            auction.status == Created || auction.status == Active,
+            "Auction must be Created or Active to approve transfer"
+        );
+
+        // Grant the auction contract a 1-unit allowance for the NFT
+        let nft_client = token::Client::new(&env, &nft_contract);
+        nft_client.approve(
+            &auction.seller,
+            &env.current_contract_address(),
+            &1i128, // One NFT token
+            &(auction.end_time + 172800), // Expire ~2 days after auction end
+        );
+
+        events::emit_nft_approved(&env, auction_id, &nft_contract, token_id);
+    }
+
     // =========================================================================
     //  Bidding — English
     // =========================================================================
