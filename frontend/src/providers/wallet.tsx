@@ -55,12 +55,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     try {
-      const connected = await isConnected();
-      if (connected && connected.isConnected) {
-        await disconnect();
-      }
-
-      await connect();
+      // Freighter v3: use requestAccess() to prompt connection
+      await requestAccess();
       const addr = await getAddress();
 
       if (addr && addr.address) {
