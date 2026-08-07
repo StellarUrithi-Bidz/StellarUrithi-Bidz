@@ -25,14 +25,47 @@ const config: IndexerConfig = {
   contractId: process.env.CONTRACT_ID || "",
   pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || "5000", 10),
   batchSize: parseInt(process.env.EVENT_BATCH_SIZE || "100", 10),
+  maxRetries: parseInt(process.env.INDEXER_MAX_RETRIES || "3", 10),
 };
 
 let lastLedger = 0;
 let isRunning = false;
 
+// ── Retry helper ──────────────────────────────────────────────────────────────────
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+  maxRetries: number = config.maxRetries,
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+        logger.warn(
+          `[retry] ${label} attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms: ${lastError.message}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 // ── Event Handlers ────────────────────────────────────────────────────────────────
 
-type EventHandler = (auctionId: number, data: Record<string, unknown>, ledgerSeq: number, txHash?: string) => Promise<void>;
+type EventHandler = (
+  auctionId: number,
+  data: Record<string, unknown>,
+  ledgerSeq: number,
+  txHash?: string,
+) => Promise<void>;
 
 const handlers: Record<string, EventHandler> = {
   auction_created: async (auctionId, data, ledgerSeq, txHash) => {
