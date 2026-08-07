@@ -31,7 +31,7 @@ mod royalty;
 mod sealed_bid;
 mod types;
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, String};
+use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env, String};
 
 use types::{
     Auction, AuctionFormat, AuctionStatus, AuctionStatus::*, ItemType, PlatformConfig,
