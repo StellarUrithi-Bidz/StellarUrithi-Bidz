@@ -502,15 +502,23 @@ impl UrithiAuction {
             .unwrap_or_else(|| panic!("No winner"));
 
         // ── Transfer NFT ownership to winner ──────────────────────────────────
-        // For digital items: call the NFT contract to transfer ownership.
-        // This atomically happens alongside payment distribution.
+        // For digital items: transfer the NFT atomically alongside payment distribution.
+        // The seller MUST have called `approve_nft_transfer` before settlement.
         match &auction.item {
             ItemType::Digital { nft_contract, token_id } => {
-                // Call the SEP-41 NFT contract: xfer(from: seller, to: winner, token_id: token_id)
-                // The auction contract acts as custodian; the seller must have pre-approved
-                // the auction contract to transfer the NFT on their behalf, or the NFT
-                // must already be held by this contract.
+                // Verify the auction contract has been approved to transfer the NFT.
+                // Without this check, the transfer would revert the entire settlement
+                // transaction, leaving the auction stuck in Ended state.
                 let nft_client = token::Client::new(&env, nft_contract);
+                let allowance = nft_client.allowance(
+                    &auction.seller,
+                    &env.current_contract_address(),
+                );
+                assert!(
+                    allowance >= 1,
+                    "Auction contract not approved to transfer NFT — seller must call approve_nft_transfer first"
+                );
+
                 nft_client.transfer(
                     &auction.seller,
                     &winner,
