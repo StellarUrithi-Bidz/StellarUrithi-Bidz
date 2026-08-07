@@ -1,4 +1,4 @@
-name: Frontend — Build & Typecheck
+name: Frontend — Typecheck, Test & Build
 
 on:
   push:
@@ -36,6 +36,31 @@ jobs:
       - name: TypeScript type-check
         working-directory: frontend
         run: npx tsc --noEmit
+
+  test:
+    name: Vitest Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: typecheck
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run vitest
+        working-directory: frontend
+        run: npm test
 
   build:
     name: Next.js Build
