@@ -9,6 +9,7 @@ import { startIndexer } from "./indexer/event_indexer";
 import { initializeWebSocket, broadcastNewBid, broadcastAuctionCreated, broadcastAuctionClosed, broadcastAuctionSettled, broadcastAuctionCancelled, broadcastBidRefunded, broadcastAttestationRecorded } from "./ws/socket_server";
 import { logger } from "./services/logger";
 import auctionRoutes from "./routes/auctions";
+import { defaultRateLimiter } from "./middleware/rateLimiter";
 
 const PORT = parseInt(process.env.PORT || "4000", 10);
 
@@ -26,6 +27,9 @@ async function main(): Promise<void> {
     credentials: true,
   }));
   app.use(express.json());
+
+  // Rate limiting — 100 req/min per IP by default
+  app.use(defaultRateLimiter);
 
   // Health check
   app.get("/api/health", (_req, res) => {
