@@ -401,6 +401,10 @@ export function stopIndexer(): void {
   isRunning = false;
 }
 
+export function resetIndexerCursor(toLedger?: number): void {
+  lastLedger = toLedger ?? 0;
+}
+
 export function getIndexerConfig(): IndexerConfig {
   return { ...config };
 }
