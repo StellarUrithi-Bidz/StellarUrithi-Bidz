@@ -3,7 +3,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { isConnected, getAddress, connect, disconnect } from "@stellar/freighter-api";
+import { isConnected as freighterIsConnected, getAddress, requestAccess, setAllowed, signMessage } from "@stellar/freighter-api";
 import toast from "react-hot-toast";
 
 interface WalletContextType {
