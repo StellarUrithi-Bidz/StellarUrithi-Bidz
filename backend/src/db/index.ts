@@ -90,6 +90,8 @@ export async function initializeDatabase(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_bids_bidder ON bids(bidder);
       CREATE INDEX IF NOT EXISTS idx_auctions_status ON auctions(status);
       CREATE INDEX IF NOT EXISTS idx_auctions_seller ON auctions(seller);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_events_dedup
+        ON events(ledger_sequence, event_type, auction_id);
       CREATE INDEX IF NOT EXISTS idx_events_auction_id ON events(auction_id);
       CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
     `);
