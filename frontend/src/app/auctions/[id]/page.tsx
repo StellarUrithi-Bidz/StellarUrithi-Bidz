@@ -259,14 +259,14 @@ export default function AuctionDetailPage() {
               {auction.format === "english" && auction.min_increment && (
                 <div>
                   <span className="text-white/40">Min Increment:</span>
-                  <span className="ml-2 text-white">{formatStroops(auction.min_increment)} stroops</span>
+                  <span className="ml-2 text-white">{formatStroops(auction.min_increment || "0")} stroops</span>
                 </div>
               )}
               {auction.format === "dutch" && auction.current_dutch_price && (
                 <div>
                   <span className="text-white/40">Current Price:</span>
                   <span className="ml-2 text-indigo-400">
-                    {formatStroops(auction.current_dutch_price)} stroops
+                    {formatStroops(auction.current_dutch_price || "0")} stroops
                   </span>
                 </div>
               )}
@@ -293,15 +293,15 @@ export default function AuctionDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/40">Seller Proceeds:</span>
-                  <span className="text-white">{formatStroops(auction.seller_proceeds)} stroops</span>
+                  <span className="text-white">{formatStroops(auction.seller_proceeds || "0")} stroops</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/40">Creator Royalty:</span>
-                  <span className="text-ochre-400">{formatStroops(auction.royalty_amount)} stroops</span>
+                  <span className="text-ochre-400">{formatStroops(auction.royalty_amount || "0")} stroops</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/40">Platform Fee:</span>
-                  <span className="text-white/50">{formatStroops(auction.platform_fee_amount)} stroops</span>
+                  <span className="text-white/50">{formatStroops(auction.platform_fee_amount || "0")} stroops</span>
                 </div>
               </div>
             </div>
@@ -487,15 +487,15 @@ export default function AuctionDetailPage() {
               <div className="mt-4 space-y-2 text-sm border-t border-white/5 pt-4">
                 <div className="flex justify-between">
                   <span className="text-white/40">Seller gets:</span>
-                  <span className="text-white">{formatStroops(auction.seller_proceeds)}</span>
+                  <span className="text-white">{formatStroops(auction.seller_proceeds || "0")}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/40">Creator gets:</span>
-                  <span className="text-ochre-400">{formatStroops(auction.royalty_amount)}</span>
+                  <span className="text-ochre-400">{formatStroops(auction.royalty_amount || "0")}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-white/40">Platform gets:</span>
-                  <span className="text-white/30">{formatStroops(auction.platform_fee_amount)}</span>
+                  <span className="text-white/30">{formatStroops(auction.platform_fee_amount || "0")}</span>
                 </div>
               </div>
             )}
