@@ -22,13 +22,64 @@ use crate::types::{
     Auction, AuctionFormat, AuctionStatus, BidCommitment, SealedBidEntry, StorageKey,
 };
 
-/// Submit a bound commitment hash during the commit phase.
+// ── HMAC-SHA256 (RFC 2104) ──────────────────────────────────────────────────────
+//
+// Soroban's env.crypto() provides SHA-256 but not HMAC-SHA256.
+// We implement HMAC-SHA256 manually using the SHA-256 primitive.
+//
+// HMAC(K, m) = H((K' ⊕ opad) || H((K' ⊕ ipad) || m))
+// where K' is the key padded to the block size (64 bytes for SHA-256).
+//
+// This replaces plain SHA256 for commitment verification because:
+// - HMAC provides hiding: an attacker cannot brute-force bid_amount without the salt,
+//   even though bid amounts have low entropy (~60 bits).
+// - HMAC is a PRF (pseudorandom function): the output is indistinguishable
+//   from random, preventing length-extension and structural attacks on SHA256.
+
+fn hmac_sha256(env: &Env, key: &BytesN<32>, message: &Bytes) -> BytesN<32> {
+    const BLOCK_SIZE: usize = 64;
+    const IPAD: u8 = 0x36;
+    const OPAD: u8 = 0x5c;
+
+    // Pad the 32-byte key to 64 bytes with zeros
+    let key_array = key.to_array();
+    let mut key_padded = [0u8; BLOCK_SIZE];
+    for i in 0..32 {
+        key_padded[i] = key_array[i];
+    }
+
+    // ── Inner hash: H((K' ⊕ ipad) || message) ──
+    let mut inner = Bytes::new(env);
+    for i in 0..BLOCK_SIZE {
+        inner.push_back(key_padded[i] ^ IPAD);
+    }
+    // Append the message bytes
+    for byte in message.iter() {
+        inner.push_back(byte);
+    }
+    let inner_hash = env.crypto().sha256(&inner);
+
+    // ── Outer hash: H((K' ⊕ opad) || inner_hash) ──
+    let mut outer = Bytes::new(env);
+    for i in 0..BLOCK_SIZE {
+        outer.push_back(key_padded[i] ^ OPAD);
+    }
+    // Append the inner hash (32 bytes)
+    let inner_bytes = inner_hash.to_array();
+    for i in 0..32 {
+        outer.push_back(inner_bytes[i]);
+    }
+
+    env.crypto().sha256(&outer)
+}
+
+/// Submit an HMAC-SHA256 commitment during the commit phase.
 ///
-/// The commitment is SHA256(bid_amount || salt || auction_id || bidder):
-/// - `bid_amount` (i128 big-endian) — the hidden bid
-/// - `salt` (BytesN<32>) — random 32-byte nonce for hiding
-/// - `auction_id` (u64 big-endian) — prevents cross-auction replay
-/// - `bidder` (Address bytes) — prevents cross-bidder precomputation
+/// The commitment is HMAC-SHA256(key = salt, message = bid_amount || auction_id || bidder):
+/// - `salt` (BytesN<32>) — 32-byte secret key for HMAC, MUST be randomly generated
+/// - `bid_amount` (i128 big-endian) — appended to the message
+/// - `auction_id` (u64 big-endian) — appended to the message, prevents cross-auction replay
+/// - `bidder` (Address bytes) — appended to the message, prevents cross-bidder precomputation
 ///
 /// The full bid amount is escrowed at commit time to prevent griefing.
 pub fn commit_bid(
