@@ -11,3 +11,7 @@
 **/npm-debug.log*
 .contract-id
 .deploy-log
+
+test_snapshots/
+*.snap
+.deploy-log
