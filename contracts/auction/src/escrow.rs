@@ -5,14 +5,17 @@ use soroban_sdk::{Address, Env, token};
 
 /// Transfer bid funds from bidder into the auction contract escrow.
 /// Returns the token client for subsequent operations.
+/// Lock bid funds from bidder into the auction contract escrow.
+///
+/// NOTE: Caller (place_bid, commit_bid, buy_now) MUST call bidder.require_auth()
+/// BEFORE invoking lock_bid. soroban-sdk v22 rejects duplicate require_auth()
+/// calls for the same address within a single call tree (Error(Auth, ExistingValue)).
 pub fn lock_bid(
     env: &Env,
     payment_token: &Address,
     bidder: &Address,
     amount: i128,
 ) {
-    bidder.require_auth();
-
     let token_client = token::Client::new(env, payment_token);
     token_client.transfer(
         bidder,

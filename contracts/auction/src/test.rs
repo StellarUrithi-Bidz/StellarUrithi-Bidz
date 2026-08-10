@@ -209,7 +209,7 @@ fn test_dutch_auction_full_flow() {
     let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::Dutch);
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
     client.activate_auction(&aid);
-    env.ledger().set_timestamp(env.ledger().timestamp() + 200);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 140);
     assert_eq!(client.get_dutch_price(&aid), 800);
     client.buy_now(&aid, &buyer);
     let a = client.get_auction(&aid);
