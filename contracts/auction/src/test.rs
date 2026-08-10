@@ -154,11 +154,11 @@ fn test_english_auction_full_flow() {
     assert_eq!(a.highest_bidder.unwrap(), bidder2);
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 4000);
+    // Must approve BEFORE close — approve_nft_transfer requires Created or Active
+    client.approve_nft_transfer(&auction_id);
     client.close_auction(&auction_id);
     assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Ended);
 
-    // Pre-approve NFT transfer before settling (required by soroban-sdk v22 settle_auction)
-    client.approve_nft_transfer(&auction_id);
     client.settle_auction(&auction_id);
     assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Settled);
 }
@@ -440,10 +440,9 @@ fn test_english_auction_royalty_distribution() {
     client.activate_auction(&aid);
     client.place_bid(&aid, &b, &1000i128);
     env.ledger().set_timestamp(env.ledger().timestamp() + 4000);
-    client.close_auction(&aid);
-
-    // Pre-approve NFT transfer before settling
+    // Must approve BEFORE close — approve_nft_transfer requires Created or Active
     client.approve_nft_transfer(&aid);
+    client.close_auction(&aid);
     client.settle_auction(&aid);
 
     let tc = token::TokenClient::new(&env, &pt);
