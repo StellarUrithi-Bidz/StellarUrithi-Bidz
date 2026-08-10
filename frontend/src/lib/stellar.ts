@@ -38,11 +38,9 @@ export function getRpcUrl(): string {
 }
 
 // ── Contract Invocation ───────────────────────────────────────────────────────────
-// NOTE: This is the transaction-building layer. For production, integrate with
-// @stellar/freighter-api's signTransaction() and the SorobanRpc.sendTransaction()
-// to complete the sign-and-submit flow. The current implementation prepares the
-// transaction XDR — the caller is responsible for passing it to Freighter for signing
-// and then submitting the signed envelope to the Stellar network.
+// Complete flow: builds, simulates, signs via Freighter, and submits to Stellar.
+// Uses Freighter's signTransaction() for the user signature and SorobanRpc's
+// sendTransaction() for submission. Returns the transaction hash for tracking.
 
 export async function invokeContract(
   method: string,
@@ -62,18 +60,54 @@ export async function invokeContract(
     .setTimeout(30)
     .build();
 
-  const preparedTx = rpc.prepareTransaction(tx);
+  // Step 1: Simulate the transaction to get the proper resource fees
+  const simResponse = await rpc.simulateTransaction(tx);
+  if ("error" in simResponse) {
+    throw new Error(`Simulation failed: ${JSON.stringify(simResponse.error)}`);
+  }
 
-  // Production integration point:
-  // 1. Serialize preparedTx to XDR
-  // 2. Pass to Freighter's signTransaction() for user signature
-  // 3. Submit signed envelope via rpc.sendTransaction()
-  // 4. Return the txHash from the submission response
+  // Step 2: Assemble the transaction with simulation results
+  const assembledTx = SorobanRpc.assembleTransaction(tx, simResponse);
 
-  return {
-    txHash: "",
-    result: preparedTx,
-  };
+  // Step 3: Sign via Freighter wallet
+  let signedTxXdr: string;
+  try {
+    // @ts-expect-error Freighter injects window.freighter at runtime
+    const freighter = window.freighter;
+    if (!freighter?.signTransaction) {
+      throw new Error("Freighter wallet not detected. Please install the Freighter extension.");
+    }
+    const signedResult = await freighter.signTransaction(
+      assembledTx.toXDR(),
+      { networkPassphrase: NETWORK_PASSPHRASE }
+    );
+    signedTxXdr = signedResult.signedTxXdr || signedResult;
+  } catch (err) {
+    throw new Error(
+      `Freighter signing failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  // Step 4: Submit the signed transaction
+  const txEnvelope = SorobanRpc.parseRawSimulation(simResponse);
+  if (!txEnvelope) {
+    throw new Error("Failed to parse simulation for submission");
+  }
+
+  const sendResponse = await rpc.sendTransaction(signedTxXdr);
+
+  if ("errorResultXdr" in sendResponse && sendResponse.errorResultXdr) {
+    throw new Error(`Transaction failed: ${sendResponse.errorResultXdr}`);
+  }
+
+  if ("hash" in sendResponse && sendResponse.hash) {
+    return {
+      txHash: sendResponse.hash,
+      result: sendResponse,
+    };
+  }
+
+  throw new Error("Transaction submission returned unexpected response");
 }
 
 // ── Type Converters ───────────────────────────────────────────────────────────────
