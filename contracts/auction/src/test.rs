@@ -20,16 +20,19 @@ fn create_token<'a>(env: &Env, admin: &Address) -> (Address, token::StellarAsset
     (asset.clone(), token::StellarAssetClient::new(env, &asset))
 }
 
-fn setup_contract<'a>(env: &Env) -> (UrithiAuctionClient<'a>, Address, Address, Address) {
+/// Returns (client, admin, platform_wallet, payment_token, nft_token).
+/// The nft_token is a real SAC — needed for allowance/transfer in settle_auction tests.
+fn setup_contract<'a>(env: &Env) -> (UrithiAuctionClient<'a>, Address, Address, Address, Address) {
     let admin = Address::generate(env);
     let platform_wallet = Address::generate(env);
     let (payment_token, token_admin) = create_token(env, &admin);
+    let (nft_token, _nft_admin) = create_token(env, &admin);
 
     let contract_id = env.register(UrithiAuction, ());
     let client = UrithiAuctionClient::new(env, &contract_id);
     client.initialize(&admin, &250u32, &1500u32, &platform_wallet);
     token_admin.mint(&admin, &1_000_000_000_000_000i128);
-    (client, admin, platform_wallet, payment_token)
+    (client, admin, platform_wallet, payment_token, nft_token)
 }
 
 fn create_test_auction(
@@ -43,8 +46,8 @@ fn create_test_auction(
     let start = now + 60;
     let end = start + 3600;
 
-    let nft_contract = Address::generate(&client.env);
-    let item = ItemType::Digital(DigitalItem { nft_contract, token_id: 1 });
+    // Use payment_token as NFT contract (a real SAC) so allowance/transfer calls work
+    let item = ItemType::Digital(DigitalItem { nft_contract: payment_token.clone(), token_id: 1 });
 
     match format {
         AuctionFormat::English => client.create_auction(&CreateAuctionParams {
@@ -126,7 +129,7 @@ fn test_initialize_twice_panics() {
 fn test_english_auction_full_flow() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _admin, _pw, payment_token) = setup_contract(&env);
+    let (client, _admin, _pw, payment_token, _nft) = setup_contract(&env);
     let seller = Address::generate(&env);
     let creator = Address::generate(&env);
     let bidder1 = Address::generate(&env);
@@ -154,6 +157,8 @@ fn test_english_auction_full_flow() {
     client.close_auction(&auction_id);
     assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Ended);
 
+    // Pre-approve NFT transfer before settling (required by soroban-sdk v22 settle_auction)
+    client.approve_nft_transfer(&auction_id);
     client.settle_auction(&auction_id);
     assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Settled);
 }
@@ -163,7 +168,7 @@ fn test_english_auction_full_flow() {
 fn test_english_bid_below_reserve_fails() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let seller = Address::generate(&env);
     let creator = Address::generate(&env);
     let bidder = Address::generate(&env);
@@ -179,7 +184,7 @@ fn test_english_bid_below_reserve_fails() {
 fn test_english_bid_too_low_increment_fails() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b1 = Address::generate(&env);
@@ -201,7 +206,7 @@ fn test_english_bid_too_low_increment_fails() {
 fn test_dutch_auction_full_flow() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -222,7 +227,7 @@ fn test_dutch_auction_full_flow() {
 fn test_dutch_price_below_reserve_floor() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::Dutch);
@@ -240,7 +245,7 @@ fn test_dutch_price_below_reserve_floor() {
 fn test_sealed_bid_full_flow() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b1 = Address::generate(&env);
@@ -281,7 +286,7 @@ fn test_sealed_bid_full_flow() {
 fn test_sealed_bid_wrong_salt_fails() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b = Address::generate(&env);
@@ -304,7 +309,7 @@ fn test_sealed_bid_wrong_salt_fails() {
 fn test_sealed_bid_bound_commitment_no_cross_auction_replay() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b = Address::generate(&env);
@@ -336,7 +341,7 @@ fn test_sealed_bid_bound_commitment_no_cross_auction_replay() {
 fn test_sealed_bid_max_bidders_cap() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let now = env.ledger().timestamp();
@@ -344,8 +349,7 @@ fn test_sealed_bid_max_bidders_cap() {
     let commit = start + 1800;
     let reveal = start + 3600;
 
-    let nft = Address::generate(&env);
-    let item = ItemType::Digital(DigitalItem { nft_contract: nft, token_id: 1 });
+    let item = ItemType::Digital(DigitalItem { nft_contract: pt.clone(), token_id: 1 });
     let aid = client.create_auction(&CreateAuctionParams {
         seller: s.clone(), original_creator: c.clone(),
         format: AuctionFormat::SealedBid, item, payment_token: pt.clone(),
@@ -375,7 +379,7 @@ fn test_sealed_bid_max_bidders_cap() {
 fn test_sealed_bid_refund_unrevealed() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b1 = Address::generate(&env);
@@ -425,7 +429,7 @@ fn test_royalty_calculation() {
 fn test_english_auction_royalty_distribution() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, pw, pt) = setup_contract(&env);
+    let (client, _a, pw, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let b = Address::generate(&env);
@@ -437,6 +441,9 @@ fn test_english_auction_royalty_distribution() {
     client.place_bid(&aid, &b, &1000i128);
     env.ledger().set_timestamp(env.ledger().timestamp() + 4000);
     client.close_auction(&aid);
+
+    // Pre-approve NFT transfer before settling
+    client.approve_nft_transfer(&aid);
     client.settle_auction(&aid);
 
     let tc = token::TokenClient::new(&env, &pt);
@@ -453,7 +460,7 @@ fn test_english_auction_royalty_distribution() {
 fn test_cancel_auction() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, _a, _p, pt) = setup_contract(&env);
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
     let s = Address::generate(&env);
     let c = Address::generate(&env);
     let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::English);
@@ -465,7 +472,7 @@ fn test_cancel_auction() {
 fn test_pause_platform() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
-    let (client, admin, _p, _pt) = setup_contract(&env);
+    let (client, admin, _p, _pt, _nft) = setup_contract(&env);
     client.update_config(&admin, &Option::None, &Option::None, &Option::Some(true));
     assert!(client.is_paused());
     client.update_config(&admin, &Option::None, &Option::None, &Option::Some(false));
