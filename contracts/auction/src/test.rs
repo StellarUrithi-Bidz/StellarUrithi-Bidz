@@ -138,6 +138,8 @@ fn test_english_auction_full_flow() {
     let ta = token::StellarAssetClient::new(&env, &payment_token);
     ta.mint(&bidder1, &10_000i128);
     ta.mint(&bidder2, &10_000i128);
+    // Seller needs token balance for the NFT transfer in settle_auction
+    ta.mint(&seller, &100i128);
 
     let auction_id = create_test_auction(&client, &seller, &creator, &payment_token, AuctionFormat::English);
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
@@ -434,6 +436,8 @@ fn test_english_auction_royalty_distribution() {
     let c = Address::generate(&env);
     let b = Address::generate(&env);
     token::StellarAssetClient::new(&env, &pt).mint(&b, &10_000i128);
+    // Seller needs token balance for NFT transfer in settle_auction
+    token::StellarAssetClient::new(&env, &pt).mint(&s, &100i128);
 
     let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::English);
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
