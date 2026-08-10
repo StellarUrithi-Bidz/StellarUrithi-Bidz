@@ -244,7 +244,7 @@ impl UrithiAuction {
 
         let nft_client = token::Client::new(&env, &digital.nft_contract);
         // expiration_ledger must fit in u32 for soroban-sdk v22
-        let expiration = ((auction.end_time + 172800) as u32).min(u32::MAX);
+        let expiration = (auction.end_time as u64).saturating_add(172800).min(u32::MAX as u64) as u32;
         nft_client.approve(
             &auction.seller,
             &env.current_contract_address(),
