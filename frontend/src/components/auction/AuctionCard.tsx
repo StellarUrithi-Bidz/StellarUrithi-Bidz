@@ -32,7 +32,7 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
 
   // Extract IPFS hash from metadata URI for image display
   const ipfsHash = auction.metadata_uri.replace("ipfs://", "");
-  const imageUrl = `${process.env.NEXT_PUBLIC_PINATA_GATEWAY}/ipfs/${ipfsHash}`;
+  const imageUrl = `${process.env.NEXT_PUBLIC_PINATA_GATEWAY || "https://gateway.pinata.cloud"}/ipfs/${ipfsHash}`;
 
   return (
     <Link href={`/auctions/${auction.id}`} className="block group">
