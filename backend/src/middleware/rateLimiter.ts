@@ -5,6 +5,10 @@
 import { Request, Response, NextFunction } from "express";
 import { logger } from "../services/logger";
 
+// Redis client — lazy-initialized when REDIS_URL is set
+let redisClient: any = null;
+const REDIS_URL = process.env.REDIS_URL;
+
 // ── Configuration ─────────────────────────────────────────────────────────────────
 
 interface RateLimitConfig {
@@ -47,12 +51,27 @@ setInterval(() => {
  * @param config.maxRequests - Max requests per window (default: 100)
  * @param config.windowMs - Time window in milliseconds (default: 60000 = 1 min)
  */
+async function initRedis() {
+  if (!REDIS_URL) return;
+  try {
+    const { Redis } = await import("ioredis");
+    redisClient = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 3 });
+    await redisClient.connect();
+    logger.info("Redis rate limiter connected");
+  } catch (err) {
+    logger.warn("Redis not available, falling back to in-memory limiter:", err);
+    redisClient = null;
+  }
+}
+
 export function createRateLimiter(config?: Partial<RateLimitConfig>) {
   const maxRequests = config?.maxRequests ?? DEFAULT_MAX_REQUESTS;
   const windowMs = config?.windowMs ?? DEFAULT_WINDOW_MS;
   const keyGenerator = config?.keyGenerator ?? defaultKeyGenerator;
 
-  return (req: Request, res: Response, next: NextFunction): void => {
+  initRedis();
+
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const key = keyGenerator(req);
     const now = Date.now();
 
