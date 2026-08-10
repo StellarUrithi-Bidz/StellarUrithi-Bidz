@@ -48,6 +48,16 @@ router.get("/bids", validate(bidHistorySchema), async (req: Request, res: Respon
   }
 });
 
+// GET /api/analytics — Platform-wide analytics (must come before /:id)
+router.get("/analytics", async (_req: Request, res: Response) => {
+  try {
+    const analytics = await getAnalytics();
+    res.json({ success: true, data: analytics });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Failed to fetch analytics" });
+  }
+});
+
 // GET /api/:id — Get single auction detail
 router.get("/:id", validate(auctionIdSchema, "params"), async (req: Request, res: Response) => {
   try {
@@ -111,14 +121,5 @@ router.post("/:id/bids", strictRateLimiter,
     }
 });
 
-// GET /api/analytics — Platform-wide analytics
-router.get("/analytics", async (_req: Request, res: Response) => {
-  try {
-    const analytics = await getAnalytics();
-    res.json({ success: true, data: analytics });
-  } catch (err) {
-    res.status(500).json({ success: false, error: "Failed to fetch analytics" });
-  }
-});
 
 export default router;
