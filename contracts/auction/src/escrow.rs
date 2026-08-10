@@ -42,6 +42,7 @@ pub fn refund_bid(
 
 /// Refund all sealed-bid participants who did not win.
 /// Called after winner is determined in sealed-bid reveal phase.
+#[allow(dead_code)]
 pub fn refund_losing_sealed_bids(
     env: &Env,
     payment_token: &Address,
