@@ -30,20 +30,23 @@ pub fn emit_auction_created(
 
 /// Emitted when a bid is placed (English auction) or a buy occurs (Dutch).
 pub fn emit_bid_placed(env: &Env, record: &BidRecord) {
-    let topics = (symbol_short!("bid_new"), record.auction_id, record.bidder.clone());
+    let topics = (
+        symbol_short!("bid_new"),
+        record.auction_id,
+        record.bidder.clone(),
+    );
     env.events().publish(
         topics,
-        (record.amount, record.timestamp, format_to_symbol(record.format.clone())),
+        (
+            record.amount,
+            record.timestamp,
+            format_to_symbol(record.format.clone()),
+        ),
     );
 }
 
 /// Emitted when a previous bidder is refunded after being outbid.
-pub fn emit_bid_refunded(
-    env: &Env,
-    auction_id: u64,
-    bidder: &Address,
-    amount: i128,
-) {
+pub fn emit_bid_refunded(env: &Env, auction_id: u64, bidder: &Address, amount: i128) {
     let topics = (symbol_short!("bid_ref"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }
@@ -55,12 +58,7 @@ pub fn emit_commitment_stored(env: &Env, auction_id: u64, bidder: &Address) {
 }
 
 /// Emitted when a sealed bid is revealed.
-pub fn emit_bid_revealed(
-    env: &Env,
-    auction_id: u64,
-    bidder: &Address,
-    amount: i128,
-) {
+pub fn emit_bid_revealed(env: &Env, auction_id: u64, bidder: &Address, amount: i128) {
     let topics = (symbol_short!("bid_rev"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }
@@ -74,7 +72,8 @@ pub fn emit_auction_closed(
     format: &AuctionFormat,
 ) {
     let topics = (symbol_short!("auc_end"), auction_id, winner.clone());
-    env.events().publish(topics, (winning_bid, format_to_symbol(format.clone())));
+    env.events()
+        .publish(topics, (winning_bid, format_to_symbol(format.clone())));
 }
 
 /// Emitted when an auction is settled and funds are distributed.
@@ -86,15 +85,12 @@ pub fn emit_auction_settled(
     platform_fee: i128,
 ) {
     let topics = (symbol_short!("auc_set"), auction_id);
-    env.events().publish(topics, (seller_proceeds, royalty_amount, platform_fee));
+    env.events()
+        .publish(topics, (seller_proceeds, royalty_amount, platform_fee));
 }
 
 /// Emitted when physical-item custodian attestation is recorded.
-pub fn emit_attestation_recorded(
-    env: &Env,
-    auction_id: u64,
-    custodian: &Address,
-) {
+pub fn emit_attestation_recorded(env: &Env, auction_id: u64, custodian: &Address) {
     let topics = (symbol_short!("att_rec"), auction_id, custodian.clone());
     env.events().publish(topics, ());
 }
@@ -106,23 +102,14 @@ pub fn emit_auction_cancelled(env: &Env, auction_id: u64, seller: &Address) {
 }
 
 /// Emitted when the seller approves the auction contract to transfer the NFT.
-pub fn emit_nft_approved(
-    env: &Env,
-    auction_id: u64,
-    nft_contract: &Address,
-    token_id: u64,
-) {
+pub fn emit_nft_approved(env: &Env, auction_id: u64, nft_contract: &Address, token_id: u64) {
     let topics = (symbol_short!("nft_appr"), auction_id);
-    env.events().publish(topics, (nft_contract.clone(), token_id));
+    env.events()
+        .publish(topics, (nft_contract.clone(), token_id));
 }
 
 /// Emitted when an unrevealed sealed-bid is refunded after the reveal deadline.
-pub fn emit_unrevealed_refunded(
-    env: &Env,
-    auction_id: u64,
-    bidder: &Address,
-    amount: i128,
-) {
+pub fn emit_unrevealed_refunded(env: &Env, auction_id: u64, bidder: &Address, amount: i128) {
     let topics = (symbol_short!("urv_ref"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
 }

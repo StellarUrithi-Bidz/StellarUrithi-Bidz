@@ -12,15 +12,15 @@ mod escrow;
 mod events;
 mod royalty;
 mod sealed_bid;
-mod types;
 #[cfg(test)]
 mod test;
+mod types;
 
 use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 
 use types::{
-    Auction, AuctionFormat, AuctionStatus::*, CreateAuctionParams,
-    ItemType, PhysicalItem, PlatformConfig, StorageKey::*,
+    Auction, AuctionFormat, AuctionStatus::*, CreateAuctionParams, ItemType, PhysicalItem,
+    PlatformConfig, StorageKey::*,
 };
 
 #[contract]
@@ -58,7 +58,9 @@ impl UrithiAuction {
 
         env.storage().instance().set(&Config, &config);
         env.storage().instance().set(&AuctionCount, &0u64);
-        env.storage().instance().set(&PlatformWallet, &platform_wallet);
+        env.storage()
+            .instance()
+            .set(&PlatformWallet, &platform_wallet);
     }
 
     // =========================================================================
@@ -88,13 +90,25 @@ impl UrithiAuction {
                 assert!(params.min_increment > 0, "Min increment must be positive");
             }
             AuctionFormat::Dutch => {
-                assert!(params.start_price > params.reserve_price, "Start price must exceed reserve");
+                assert!(
+                    params.start_price > params.reserve_price,
+                    "Start price must exceed reserve"
+                );
                 assert!(params.price_decay_per_second > 0, "Decay must be positive");
             }
             AuctionFormat::SealedBid => {
-                assert!(params.start_time < params.commit_deadline, "Commit deadline after start");
-                assert!(params.commit_deadline < params.reveal_deadline, "Reveal deadline after commit");
-                assert!(params.reveal_deadline <= params.end_time, "Reveal deadline mismatch");
+                assert!(
+                    params.start_time < params.commit_deadline,
+                    "Commit deadline after start"
+                );
+                assert!(
+                    params.commit_deadline < params.reveal_deadline,
+                    "Reveal deadline after commit"
+                );
+                assert!(
+                    params.reveal_deadline <= params.end_time,
+                    "Reveal deadline mismatch"
+                );
             }
         }
 
@@ -134,8 +148,13 @@ impl UrithiAuction {
         env.storage().instance().set(&Auction(auction_id), &auction);
 
         events::emit_auction_created(
-            &env, auction_id, &params.seller, &params.format,
-            params.reserve_price, params.end_time, &params.metadata_uri,
+            &env,
+            auction_id,
+            &params.seller,
+            &params.format,
+            params.reserve_price,
+            params.end_time,
+            &params.metadata_uri,
         );
 
         auction_id
@@ -196,7 +215,10 @@ impl UrithiAuction {
         auction.status = Active;
 
         let now = env.ledger().timestamp();
-        assert!(now >= auction.start_time, "Cannot activate before start time");
+        assert!(
+            now >= auction.start_time,
+            "Cannot activate before start time"
+        );
 
         env.storage().instance().set(&Auction(auction_id), &auction);
     }
@@ -244,7 +266,10 @@ impl UrithiAuction {
 
         let nft_client = token::Client::new(&env, &digital.nft_contract);
         // expiration_ledger must fit in u32 for soroban-sdk v22
-        let expiration = (auction.end_time as u64).saturating_add(172800).min(u32::MAX as u64) as u32;
+        let expiration = auction
+            .end_time
+            .saturating_add(172800)
+            .min(u32::MAX as u64) as u32;
         nft_client.approve(
             &auction.seller,
             &env.current_contract_address(),
@@ -336,7 +361,13 @@ impl UrithiAuction {
             AuctionFormat::English => {
                 if let Some(ref winner) = auction.highest_bidder.clone() {
                     auction.status = Ended;
-                    events::emit_auction_closed(&env, auction_id, winner, auction.highest_bid, &AuctionFormat::English);
+                    events::emit_auction_closed(
+                        &env,
+                        auction_id,
+                        winner,
+                        auction.highest_bid,
+                        &AuctionFormat::English,
+                    );
                 } else {
                     auction.status = Cancelled;
                     events::emit_auction_cancelled(&env, auction_id, &auction.seller);
@@ -370,16 +401,20 @@ impl UrithiAuction {
 
         assert!(auction.status == Ended, "Auction not in Ended state");
 
-        let winner = auction.highest_bidder.clone().unwrap_or_else(|| panic!("No winner"));
+        let winner = auction
+            .highest_bidder
+            .clone()
+            .unwrap_or_else(|| panic!("No winner"));
 
         match &auction.item {
             ItemType::Digital(item) => {
                 let nft_client = token::Client::new(&env, &item.nft_contract);
-                let allowance = nft_client.allowance(
-                    &auction.seller,
-                    &env.current_contract_address(),
+                let allowance =
+                    nft_client.allowance(&auction.seller, &env.current_contract_address());
+                assert!(
+                    allowance >= 1,
+                    "Auction contract not approved to transfer NFT"
                 );
-                assert!(allowance >= 1, "Auction contract not approved to transfer NFT");
                 nft_client.transfer(&auction.seller, &winner, &(item.token_id as i128));
             }
             ItemType::Physical(_) => {}
@@ -398,16 +433,23 @@ impl UrithiAuction {
         );
 
         royalty::distribute_proceeds(
-            &env, &auction.payment_token, &auction.seller,
-            &auction.original_creator, &platform_wallet, &breakdown,
+            &env,
+            &auction.payment_token,
+            &auction.seller,
+            &auction.original_creator,
+            &platform_wallet,
+            &breakdown,
         );
 
         auction.status = Settled;
         env.storage().instance().set(&Auction(auction_id), &auction);
 
         events::emit_auction_settled(
-            &env, auction_id,
-            breakdown.seller_amount, breakdown.royalty_amount, breakdown.platform_fee_amount,
+            &env,
+            auction_id,
+            breakdown.seller_amount,
+            breakdown.royalty_amount,
+            breakdown.platform_fee_amount,
         );
     }
 
@@ -423,12 +465,21 @@ impl UrithiAuction {
         paused: Option<bool>,
     ) {
         admin.require_auth();
-        let mut config: PlatformConfig = env.storage().instance().get(&Config)
+        let mut config: PlatformConfig = env
+            .storage()
+            .instance()
+            .get(&Config)
             .unwrap_or_else(|| panic!("Not initialized"));
         assert!(admin == config.admin, "Not the admin");
-        if let Some(fee) = new_fee_bps { config.default_platform_fee_bps = fee; }
-        if let Some(max_royalty) = new_max_royalty_bps { config.max_royalty_bps = max_royalty; }
-        if let Some(is_paused) = paused { config.paused = is_paused; }
+        if let Some(fee) = new_fee_bps {
+            config.default_platform_fee_bps = fee;
+        }
+        if let Some(max_royalty) = new_max_royalty_bps {
+            config.max_royalty_bps = max_royalty;
+        }
+        if let Some(is_paused) = paused {
+            config.paused = is_paused;
+        }
         env.storage().instance().set(&Config, &config);
     }
 
@@ -437,7 +488,9 @@ impl UrithiAuction {
     // =========================================================================
 
     pub fn get_auction(env: Env, auction_id: u64) -> Auction {
-        env.storage().instance().get(&Auction(auction_id))
+        env.storage()
+            .instance()
+            .get(&Auction(auction_id))
             .unwrap_or_else(|| panic!("Auction not found"))
     }
 
@@ -446,7 +499,10 @@ impl UrithiAuction {
     }
 
     pub fn is_paused(env: Env) -> bool {
-        env.storage().instance().get::<_, PlatformConfig>(&Config)
-            .map(|c| c.paused).unwrap_or(true)
+        env.storage()
+            .instance()
+            .get::<_, PlatformConfig>(&Config)
+            .map(|c| c.paused)
+            .unwrap_or(true)
     }
 }

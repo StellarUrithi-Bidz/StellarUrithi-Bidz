@@ -1,5 +1,5 @@
 //! Royalty-split module — distributes proceeds on auction settlement.
-//! 
+//!
 //! On every hammer sale, the winning bid is split three ways:
 //! 1. Seller receives the net proceeds (winning_bid - royalty - platform_fee).
 //! 2. Original creator receives royalty (winning_bid * royalty_bps / 10_000).
@@ -7,10 +7,12 @@
 //!
 //! This directly delivers one of Afristore's roadmap items: auto-royalty payments.
 
-use soroban_sdk::{Address, Env, token};
+use soroban_sdk::{token, Address, Env};
 
 /// Breakdown of proceeds from a settled auction.
+/// `total` is stored for audit/event purposes but not read in distribution logic.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProceedsBreakdown {
     pub seller_amount: i128,
     pub royalty_amount: i128,
@@ -67,11 +69,7 @@ pub fn distribute_proceeds(
 
     // Transfer seller proceeds
     if breakdown.seller_amount > 0 {
-        token_client.transfer(
-            &contract_address,
-            seller,
-            &breakdown.seller_amount,
-        );
+        token_client.transfer(&contract_address, seller, &breakdown.seller_amount);
     }
 
     // Transfer royalty to original creator

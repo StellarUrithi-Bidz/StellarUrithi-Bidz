@@ -55,7 +55,10 @@ pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address) {
         auction.format == AuctionFormat::Dutch,
         "Not a Dutch auction"
     );
-    assert!(auction.status == AuctionStatus::Active, "Auction not active");
+    assert!(
+        auction.status == AuctionStatus::Active,
+        "Auction not active"
+    );
     assert!(*buyer != auction.seller, "Seller cannot buy own auction");
 
     let now = env.ledger().timestamp();
@@ -89,11 +92,5 @@ pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address) {
         },
     );
 
-    events::emit_auction_closed(
-        env,
-        auction_id,
-        buyer,
-        price,
-        &AuctionFormat::Dutch,
-    );
+    events::emit_auction_closed(env, auction_id, buyer, price, &AuctionFormat::Dutch);
 }

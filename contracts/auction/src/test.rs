@@ -6,11 +6,8 @@ use soroban_sdk::{
 };
 
 use crate::{
-    types::{
-AuctionFormat, AuctionStatus, CreateAuctionParams,
-        DigitalItem, ItemType,
-    },
     sealed_bid::{build_commitment_message, hmac_sha256},
+    types::{AuctionFormat, AuctionStatus, CreateAuctionParams, DigitalItem, ItemType},
     UrithiAuction, UrithiAuctionClient,
 };
 
@@ -47,35 +44,68 @@ fn create_test_auction(
     let end = start + 3600;
 
     // Use payment_token as NFT contract (a real SAC) so allowance/transfer calls work
-    let item = ItemType::Digital(DigitalItem { nft_contract: payment_token.clone(), token_id: 1 });
+    let item = ItemType::Digital(DigitalItem {
+        nft_contract: payment_token.clone(),
+        token_id: 1,
+    });
 
     match format {
         AuctionFormat::English => client.create_auction(&CreateAuctionParams {
-            seller: seller.clone(), original_creator: creator.clone(),
-            format: AuctionFormat::English, item, payment_token: payment_token.clone(),
-            reserve_price: 100, royalty_bps: 500, start_time: start, end_time: end,
+            seller: seller.clone(),
+            original_creator: creator.clone(),
+            format: AuctionFormat::English,
+            item,
+            payment_token: payment_token.clone(),
+            reserve_price: 100,
+            royalty_bps: 500,
+            start_time: start,
+            end_time: end,
             metadata_uri: String::from_str(&client.env, "ipfs://test"),
-            min_increment: 10, start_price: 0, price_decay_per_second: 0,
-            commit_deadline: 0, reveal_deadline: 0, max_bidders: 0,
+            min_increment: 10,
+            start_price: 0,
+            price_decay_per_second: 0,
+            commit_deadline: 0,
+            reveal_deadline: 0,
+            max_bidders: 0,
         }),
         AuctionFormat::Dutch => client.create_auction(&CreateAuctionParams {
-            seller: seller.clone(), original_creator: creator.clone(),
-            format: AuctionFormat::Dutch, item, payment_token: payment_token.clone(),
-            reserve_price: 100, royalty_bps: 500, start_time: start, end_time: end,
+            seller: seller.clone(),
+            original_creator: creator.clone(),
+            format: AuctionFormat::Dutch,
+            item,
+            payment_token: payment_token.clone(),
+            reserve_price: 100,
+            royalty_bps: 500,
+            start_time: start,
+            end_time: end,
             metadata_uri: String::from_str(&client.env, "ipfs://dutch"),
-            min_increment: 0, start_price: 1000, price_decay_per_second: 1,
-            commit_deadline: 0, reveal_deadline: 0, max_bidders: 0,
+            min_increment: 0,
+            start_price: 1000,
+            price_decay_per_second: 1,
+            commit_deadline: 0,
+            reveal_deadline: 0,
+            max_bidders: 0,
         }),
         AuctionFormat::SealedBid => {
             let commit = start + 1800;
             let reveal = start + 3600;
             client.create_auction(&CreateAuctionParams {
-                seller: seller.clone(), original_creator: creator.clone(),
-                format: AuctionFormat::SealedBid, item, payment_token: payment_token.clone(),
-                reserve_price: 100, royalty_bps: 500, start_time: start, end_time: reveal,
+                seller: seller.clone(),
+                original_creator: creator.clone(),
+                format: AuctionFormat::SealedBid,
+                item,
+                payment_token: payment_token.clone(),
+                reserve_price: 100,
+                royalty_bps: 500,
+                start_time: start,
+                end_time: reveal,
                 metadata_uri: String::from_str(&client.env, "ipfs://sealed"),
-                min_increment: 0, start_price: 0, price_decay_per_second: 0,
-                commit_deadline: commit, reveal_deadline: reveal, max_bidders: 10,
+                min_increment: 0,
+                start_price: 0,
+                price_decay_per_second: 0,
+                commit_deadline: commit,
+                reveal_deadline: reveal,
+                max_bidders: 10,
             })
         }
     }
@@ -141,7 +171,13 @@ fn test_english_auction_full_flow() {
     // Seller needs exactly 1 token unit for the NFT transfer in settle_auction
     ta.mint(&seller, &1i128);
 
-    let auction_id = create_test_auction(&client, &seller, &creator, &payment_token, AuctionFormat::English);
+    let auction_id = create_test_auction(
+        &client,
+        &seller,
+        &creator,
+        &payment_token,
+        AuctionFormat::English,
+    );
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
     client.activate_auction(&auction_id);
 
@@ -162,7 +198,10 @@ fn test_english_auction_full_flow() {
     assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Ended);
 
     client.settle_auction(&auction_id);
-    assert_eq!(client.get_auction(&auction_id).status, AuctionStatus::Settled);
+    assert_eq!(
+        client.get_auction(&auction_id).status,
+        AuctionStatus::Settled
+    );
 }
 
 #[test]
@@ -351,14 +390,27 @@ fn test_sealed_bid_max_bidders_cap() {
     let commit = start + 1800;
     let reveal = start + 3600;
 
-    let item = ItemType::Digital(DigitalItem { nft_contract: pt.clone(), token_id: 1 });
+    let item = ItemType::Digital(DigitalItem {
+        nft_contract: pt.clone(),
+        token_id: 1,
+    });
     let aid = client.create_auction(&CreateAuctionParams {
-        seller: s.clone(), original_creator: c.clone(),
-        format: AuctionFormat::SealedBid, item, payment_token: pt.clone(),
-        reserve_price: 100, royalty_bps: 500, start_time: start, end_time: reveal,
+        seller: s.clone(),
+        original_creator: c.clone(),
+        format: AuctionFormat::SealedBid,
+        item,
+        payment_token: pt.clone(),
+        reserve_price: 100,
+        royalty_bps: 500,
+        start_time: start,
+        end_time: reveal,
         metadata_uri: String::from_str(&env, "ipfs://cap"),
-        min_increment: 0, start_price: 0, price_decay_per_second: 0,
-        commit_deadline: commit, reveal_deadline: reveal, max_bidders: 2,
+        min_increment: 0,
+        start_price: 0,
+        price_decay_per_second: 0,
+        commit_deadline: commit,
+        reveal_deadline: reveal,
+        max_bidders: 2,
     });
 
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
@@ -372,9 +424,24 @@ fn test_sealed_bid_max_bidders_cap() {
     token::StellarAssetClient::new(&env, &pt).mint(&b3, &10_000i128);
 
     let salt = BytesN::<32>::from_array(&env, &[1u8; 32]);
-    client.commit_bid(&aid, &b1, &compute_hmac_commitment(&env, 100, &salt, aid, &b1), &100i128);
-    client.commit_bid(&aid, &b2, &compute_hmac_commitment(&env, 200, &salt, aid, &b2), &200i128);
-    client.commit_bid(&aid, &b3, &compute_hmac_commitment(&env, 300, &salt, aid, &b3), &300i128);
+    client.commit_bid(
+        &aid,
+        &b1,
+        &compute_hmac_commitment(&env, 100, &salt, aid, &b1),
+        &100i128,
+    );
+    client.commit_bid(
+        &aid,
+        &b2,
+        &compute_hmac_commitment(&env, 200, &salt, aid, &b2),
+        &200i128,
+    );
+    client.commit_bid(
+        &aid,
+        &b3,
+        &compute_hmac_commitment(&env, 300, &salt, aid, &b3),
+        &300i128,
+    );
 }
 
 #[test]
@@ -394,8 +461,18 @@ fn test_sealed_bid_refund_unrevealed() {
     client.activate_auction(&aid);
 
     let salt = BytesN::<32>::from_array(&env, &[1u8; 32]);
-    client.commit_bid(&aid, &b1, &compute_hmac_commitment(&env, 300, &salt, aid, &b1), &300i128);
-    client.commit_bid(&aid, &b2, &compute_hmac_commitment(&env, 500, &salt, aid, &b2), &500i128);
+    client.commit_bid(
+        &aid,
+        &b1,
+        &compute_hmac_commitment(&env, 300, &salt, aid, &b1),
+        &300i128,
+    );
+    client.commit_bid(
+        &aid,
+        &b2,
+        &compute_hmac_commitment(&env, 500, &salt, aid, &b2),
+        &500i128,
+    );
 
     let a = client.get_auction(&aid);
     env.ledger().set_timestamp(a.commit_deadline + 10);

@@ -17,12 +17,7 @@ use crate::types::{Auction, AuctionFormat, AuctionStatus, BidRecord, StorageKey}
 /// - Bid must exceed the current highest bid by at least `min_increment`.
 /// - Bid must meet or exceed the reserve price.
 /// - Previous highest bidder (if any) is refunded automatically.
-pub fn place_bid(
-    env: &Env,
-    auction_id: u64,
-    bidder: &Address,
-    bid_amount: i128,
-) {
+pub fn place_bid(env: &Env, auction_id: u64, bidder: &Address, bid_amount: i128) {
     bidder.require_auth();
 
     let mut auction: Auction = env
@@ -36,8 +31,14 @@ pub fn place_bid(
         auction.format == AuctionFormat::English,
         "Not an English auction"
     );
-    assert!(auction.status == AuctionStatus::Active, "Auction not active");
-    assert!(*bidder != auction.seller, "Seller cannot bid on own auction");
+    assert!(
+        auction.status == AuctionStatus::Active,
+        "Auction not active"
+    );
+    assert!(
+        *bidder != auction.seller,
+        "Seller cannot bid on own auction"
+    );
 
     let now = env.ledger().timestamp();
     assert!(now < auction.end_time, "Auction has ended");

@@ -21,14 +21,12 @@ pub(crate) fn hmac_sha256(env: &Env, key: &BytesN<32>, message: &Bytes) -> Bytes
 
     let key_array = key.to_array();
     let mut key_padded = [0u8; BLOCK_SIZE];
-    for i in 0..32 {
-        key_padded[i] = key_array[i];
-    }
+    key_padded[..32].copy_from_slice(&key_array);
 
     // Inner hash: H((K' ⊕ ipad) || message)
     let mut inner = Bytes::new(env);
-    for i in 0..BLOCK_SIZE {
-        inner.push_back(key_padded[i] ^ IPAD);
+    for &byte in key_padded.iter() {
+        inner.push_back(byte ^ IPAD);
     }
     for i in 0..message.len() {
         inner.push_back(message.get(i).unwrap_or(0));
@@ -37,12 +35,12 @@ pub(crate) fn hmac_sha256(env: &Env, key: &BytesN<32>, message: &Bytes) -> Bytes
 
     // Outer hash: H((K' ⊕ opad) || inner_hash)
     let mut outer = Bytes::new(env);
-    for i in 0..BLOCK_SIZE {
-        outer.push_back(key_padded[i] ^ OPAD);
+    for &byte in key_padded.iter() {
+        outer.push_back(byte ^ OPAD);
     }
     let ih = inner_hash.to_array();
-    for i in 0..32 {
-        outer.push_back(ih[i]);
+    for &byte in ih.iter() {
+        outer.push_back(byte);
     }
 
     env.crypto().sha256(&outer).into()
@@ -50,24 +48,33 @@ pub(crate) fn hmac_sha256(env: &Env, key: &BytesN<32>, message: &Bytes) -> Bytes
 
 /// Build the HMAC message: bid_amount || auction_id || bidder_address.
 /// Public for test access — tests need to compute matching commitments.
-pub(crate) fn build_commitment_message(env: &Env, bid_amount: i128, auction_id: u64, bidder: &Address) -> Bytes {
+pub(crate) fn build_commitment_message(
+    env: &Env,
+    bid_amount: i128,
+    auction_id: u64,
+    bidder: &Address,
+) -> Bytes {
     let mut msg = Bytes::new(env);
 
     // bid_amount as big-endian i128 (16 bytes)
     let ba = bid_amount.to_be_bytes();
-    for b in ba { msg.push_back(b); }
+    for b in ba {
+        msg.push_back(b);
+    }
 
     // auction_id as big-endian u64 (8 bytes)
     let id = auction_id.to_be_bytes();
-    for b in id { msg.push_back(b); }
+    for b in id {
+        msg.push_back(b);
+    }
 
     // bidder address — serialize String bytes via copy_into_slice
     let addr_str = bidder.to_string();
     let str_len = addr_str.len() as usize;
     let mut buf = [0u8; 64];
     addr_str.copy_into_slice(&mut buf[..str_len.min(64)]);
-    for i in 0..str_len.min(64) {
-        msg.push_back(buf[i]);
+    for &byte in buf.iter().take(str_len.min(64)) {
+        msg.push_back(byte);
     }
 
     msg
@@ -88,21 +95,36 @@ pub fn commit_bid(
         .get(&StorageKey::Auction(auction_id))
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
-    assert!(auction.format == AuctionFormat::SealedBid, "Not a sealed-bid auction");
-    assert!(auction.status == AuctionStatus::Active, "Auction not active");
+    assert!(
+        auction.format == AuctionFormat::SealedBid,
+        "Not a sealed-bid auction"
+    );
+    assert!(
+        auction.status == AuctionStatus::Active,
+        "Auction not active"
+    );
 
     let now = env.ledger().timestamp();
     assert!(now < auction.commit_deadline, "Commit phase has ended");
     assert!(now >= auction.start_time, "Auction not yet started");
-    assert!(bid_amount >= auction.reserve_price, "Bid below reserve price");
+    assert!(
+        bid_amount >= auction.reserve_price,
+        "Bid below reserve price"
+    );
 
     if auction.max_bidders > 0 {
-        assert!(auction.bidder_count < auction.max_bidders, "Maximum number of bidders reached");
+        assert!(
+            auction.bidder_count < auction.max_bidders,
+            "Maximum number of bidders reached"
+        );
     }
 
     let key = StorageKey::Commitment(auction_id, bidder.clone());
     assert!(
-        env.storage().instance().get::<_, BidCommitment>(&key).is_none(),
+        env.storage()
+            .instance()
+            .get::<_, BidCommitment>(&key)
+            .is_none(),
         "Bidder has already committed to this auction"
     );
 
@@ -117,7 +139,9 @@ pub fn commit_bid(
     env.storage().instance().set(&key, &commitment_record);
 
     auction.bidder_count += 1;
-    env.storage().instance().set(&StorageKey::Auction(auction_id), &auction);
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
 
     events::emit_commitment_stored(env, auction_id, bidder);
 }
@@ -137,7 +161,10 @@ pub fn reveal_bid(
         .get(&StorageKey::Auction(auction_id))
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
-    assert!(auction.format == AuctionFormat::SealedBid, "Not a sealed-bid auction");
+    assert!(
+        auction.format == AuctionFormat::SealedBid,
+        "Not a sealed-bid auction"
+    );
 
     let now = env.ledger().timestamp();
     assert!(now >= auction.commit_deadline, "Commit phase not yet ended");
@@ -153,11 +180,17 @@ pub fn reveal_bid(
     // Compute HMAC-SHA256(key=salt, message=bid_amount || auction_id || bidder)
     let message = build_commitment_message(env, bid_amount, auction_id, bidder);
     let computed = hmac_sha256(env, &salt, &message);
-    assert!(computed == stored.commitment, "Commitment verification failed");
+    assert!(
+        computed == stored.commitment,
+        "Commitment verification failed"
+    );
 
     let reveal_key = StorageKey::RevealedBid(auction_id, bidder.clone());
     assert!(
-        env.storage().instance().get::<_, SealedBidEntry>(&reveal_key).is_none(),
+        env.storage()
+            .instance()
+            .get::<_, SealedBidEntry>(&reveal_key)
+            .is_none(),
         "Bid already revealed"
     );
 
@@ -168,7 +201,9 @@ pub fn reveal_bid(
     };
 
     auction.revealed_bids.push_back(entry.clone());
-    env.storage().instance().set(&StorageKey::Auction(auction_id), &auction);
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
     env.storage().instance().set(&reveal_key, &entry);
 
     events::emit_bid_revealed(env, auction_id, bidder, bid_amount);
@@ -181,7 +216,10 @@ pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
         .get(&StorageKey::Auction(auction_id))
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
-    assert!(auction.format == AuctionFormat::SealedBid, "Not a sealed-bid auction");
+    assert!(
+        auction.format == AuctionFormat::SealedBid,
+        "Not a sealed-bid auction"
+    );
 
     let now = env.ledger().timestamp();
     assert!(now >= auction.reveal_deadline, "Reveal phase not yet ended");
@@ -195,7 +233,10 @@ pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
 
     let reveal_key = StorageKey::RevealedBid(auction_id, bidder.clone());
     assert!(
-        env.storage().instance().get::<_, SealedBidEntry>(&reveal_key).is_none(),
+        env.storage()
+            .instance()
+            .get::<_, SealedBidEntry>(&reveal_key)
+            .is_none(),
         "Bid already revealed — use finalize instead"
     );
 
@@ -203,8 +244,12 @@ pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
     env.storage().instance().remove(&commit_key);
     escrow::refund_bid(env, &auction.payment_token, bidder, refund_amount);
 
-    if auction.bidder_count > 0 { auction.bidder_count -= 1; }
-    env.storage().instance().set(&StorageKey::Auction(auction_id), &auction);
+    if auction.bidder_count > 0 {
+        auction.bidder_count -= 1;
+    }
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
 
     events::emit_unrevealed_refunded(env, auction_id, bidder, refund_amount);
 }
@@ -216,8 +261,14 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
         .get(&StorageKey::Auction(auction_id))
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
-    assert!(auction.format == AuctionFormat::SealedBid, "Not a sealed-bid auction");
-    assert!(auction.status == AuctionStatus::Active, "Auction not active");
+    assert!(
+        auction.format == AuctionFormat::SealedBid,
+        "Not a sealed-bid auction"
+    );
+    assert!(
+        auction.status == AuctionStatus::Active,
+        "Auction not active"
+    );
 
     let now = env.ledger().timestamp();
     assert!(now >= auction.reveal_deadline, "Reveal phase not yet ended");
@@ -247,9 +298,17 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
     auction.highest_bid = winner.amount;
     auction.status = AuctionStatus::Ended;
 
-    env.storage().instance().set(&StorageKey::Auction(auction_id), &auction);
+    env.storage()
+        .instance()
+        .set(&StorageKey::Auction(auction_id), &auction);
 
-    events::emit_auction_closed(env, auction_id, &winner.bidder, winner.amount, &AuctionFormat::SealedBid);
+    events::emit_auction_closed(
+        env,
+        auction_id,
+        &winner.bidder,
+        winner.amount,
+        &AuctionFormat::SealedBid,
+    );
 }
 
 // ── HMAC-SHA256 Audit Notes ──────────────────────────────────────────────────
