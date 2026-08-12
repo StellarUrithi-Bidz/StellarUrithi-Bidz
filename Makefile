@@ -148,8 +148,8 @@ fund:
 
 # ── Deploy ─────────────────────────────────────────────────────────────────────────
 
-# The deploy targets use --output json and jq for reliable contract ID extraction
-# (parsing the last line of stdout is fragile across CLI versions).
+# The deploy targets capture the contract ID from the last line of stdout
+# (stellar CLI v27+ outputs the contract ID on the final line).
 
 .PHONY: deploy-testnet
 deploy-testnet: optimize
@@ -158,13 +158,11 @@ deploy-testnet: optimize
 	@echo "   Deployer: $(DEPLOYER)"
 	@echo "   WASM:     $(WASM_OPT)"
 	@echo ""
-	@which jq >/dev/null 2>&1 || (echo "$(RED)✖ jq is required. Install: apt install jq / brew install jq$(RESET)" && exit 1)
 	@CONTRACT_ID=$$(soroban contract deploy \
 		--wasm $(WASM_OPT) \
-		--source $(DEPLOYER) \
+		--source-account $(DEPLOYER) \
 		--network testnet \
-		--fee 100000 \
-		--output json 2>&1 | jq -r '.contract_id // empty'); \
+		--fee 100000 2>&1 | tail -n 1 | grep -Eo 'C[A-Z0-9]{55}' || echo ""); \
 	if [ -z "$$CONTRACT_ID" ]; then \
 		echo "$(RED)✖ Deployment failed. Check that the identity is funded and the WASM is valid.$(RESET)"; \
 		exit 1; \
@@ -186,10 +184,9 @@ deploy-mainnet: optimize
 	@which jq >/dev/null 2>&1 || (echo "$(RED)✖ jq is required$(RESET)" && exit 1)
 	@CONTRACT_ID=$$(soroban contract deploy \
 		--wasm $(WASM_OPT) \
-		--source $(DEPLOYER) \
+		--source-account $(DEPLOYER) \
 		--network mainnet \
-		--fee 100000 \
-		--output json 2>&1 | jq -r '.contract_id // empty'); \
+		--fee 100000 2>&1 | tail -n 1 | grep -Eo 'C[A-Z0-9]{55}' || echo ""); \
 	if [ -z "$$CONTRACT_ID" ]; then \
 		echo "$(RED)✖ Deployment failed$(RESET)"; \
 		exit 1; \
@@ -216,7 +213,7 @@ initialize:
 	echo ""; \
 	soroban contract invoke \
 		--id $(CONTRACT_ID) \
-		--source $(DEPLOYER) \
+		--source-account $(DEPLOYER) \
 		--network $(NETWORK) \
 		--fee 100000 \
 		-- \
@@ -240,7 +237,7 @@ verify:
 	@echo "  ── Auction Count ──"
 	@soroban contract invoke \
 		--id $(CONTRACT_ID) \
-		--source $(DEPLOYER) \
+		--source-account $(DEPLOYER) \
 		--network $(NETWORK) \
 		-- \
 		get_auction_count 2>/dev/null || echo "   (contract may need initialization)"
@@ -248,7 +245,7 @@ verify:
 	@echo "  ── Platform Paused? ──"
 	@soroban contract invoke \
 		--id $(CONTRACT_ID) \
-		--source $(DEPLOYER) \
+		--source-account $(DEPLOYER) \
 		--network $(NETWORK) \
 		-- \
 		is_paused 2>/dev/null || echo "   (contract may need initialization)"
@@ -291,7 +288,7 @@ demo: initialize
 	echo "   Reserve: 100 XLM"; \
 	echo "   Royalty: 5%"; \
 	soroban contract invoke \
-		--id $(CONTRACT_ID) --source $(DEPLOYER) --network $(NETWORK) --fee 100000 -- \
+		--id $(CONTRACT_ID) --source-account $(DEPLOYER) --network $(NETWORK) --fee 100000 -- \
 		create_auction \
 		--seller "$$SELLER" \
 		--original_creator "$$SELLER" \

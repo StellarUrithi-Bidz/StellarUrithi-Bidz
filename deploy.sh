@@ -165,7 +165,7 @@ setup_identity() {
     success "Identity '$DEPLOYER' exists: $ADDR"
   else
     info "Generating new identity: $DEPLOYER"
-    soroban keys generate "$DEPLOYER" --network testnet --no-fund
+    soroban keys generate "$DEPLOYER" --network testnet
     ADDR=$(soroban keys address "$DEPLOYER")
     success "Generated: $ADDR"
   fi
@@ -265,10 +265,9 @@ deploy() {
   info "Deploying..."
   DEPLOY_OUTPUT=$(soroban contract deploy \
     --wasm "$WASM_OPT" \
-    --source "$DEPLOYER" \
+    --source-account "$DEPLOYER" \
     --network "$NETWORK" \
-    --fee 100000 \
-    --output json 2>&1)
+    --fee 100000 2>&1)
   DEPLOY_EXIT=$?
 
   if [ $DEPLOY_EXIT -ne 0 ]; then
@@ -277,8 +276,8 @@ deploy() {
     exit 1
   fi
 
-  # Extract contract ID from JSON output (reliable across CLI versions)
-  CONTRACT_ID=$(echo "$DEPLOY_OUTPUT" | jq -r '.contract_id // empty')
+  # Extract contract ID from the last line of output (stellar CLI v27+)
+  CONTRACT_ID=$(echo "$DEPLOY_OUTPUT" | tail -n 1 | grep -Eo 'C[A-Z0-9]{55}' || echo "")
 
   if [ -z "$CONTRACT_ID" ] || [ "$CONTRACT_ID" = "null" ]; then
     fail "Could not extract contract ID from deployment output:"
@@ -365,7 +364,7 @@ initialize() {
   info "Calling initialize..."
   soroban contract invoke \
     --id "$CONTRACT_ID" \
-    --source "$DEPLOYER" \
+    --source-account "$DEPLOYER" \
     --network "$NETWORK" \
     --fee 100000 \
     -- \
@@ -401,7 +400,7 @@ verify() {
   info "Checking auction count..."
   AUCTION_COUNT=$(soroban contract invoke \
     --id "$CONTRACT_ID" \
-    --source "$DEPLOYER" \
+    --source-account "$DEPLOYER" \
     --network "$NETWORK" \
     -- \
     get_auction_count 2>/dev/null || echo "N/A")
@@ -411,7 +410,7 @@ verify() {
   info "Checking platform state..."
   IS_PAUSED=$(soroban contract invoke \
     --id "$CONTRACT_ID" \
-    --source "$DEPLOYER" \
+    --source-account "$DEPLOYER" \
     --network "$NETWORK" \
     -- \
     is_paused 2>/dev/null || echo "N/A")
@@ -465,7 +464,7 @@ run_demo() {
 
   soroban contract invoke \
     --id "$CONTRACT_ID" \
-    --source "$DEPLOYER" \
+    --source-account "$DEPLOYER" \
     --network "$NETWORK" \
     --fee 100000 \
     -- \

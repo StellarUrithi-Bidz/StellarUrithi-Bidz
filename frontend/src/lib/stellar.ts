@@ -78,7 +78,7 @@ export async function invokeContract(
       throw new Error("Freighter wallet not detected. Please install the Freighter extension.");
     }
     const signedResult = await freighter.signTransaction(
-      assembledTx.toXDR(),
+      assembledTx.build().toEnvelope().toXDR('base64'),
       { networkPassphrase: NETWORK_PASSPHRASE }
     );
     signedTxXdr = signedResult.signedTxXdr || signedResult;
@@ -89,11 +89,6 @@ export async function invokeContract(
   }
 
   // Step 4: Submit the signed transaction
-  const txEnvelope = SorobanRpc.parseRawSimulation(simResponse);
-  if (!txEnvelope) {
-    throw new Error("Failed to parse simulation for submission");
-  }
-
   const sendResponse = await rpc.sendTransaction(signedTxXdr);
 
   if ("errorResultXdr" in sendResponse && sendResponse.errorResultXdr) {
