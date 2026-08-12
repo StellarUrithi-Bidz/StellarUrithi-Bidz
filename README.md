@@ -154,7 +154,8 @@ StellarUrithi-Bidz/
 
 - **Docker** & **Docker Compose** (for one-command local dev)
 - **Rust** (1.75+) with `wasm32-unknown-unknown` target (for contracts)
-- **Soroban CLI** (>= 22.0.0): `cargo install soroban-cli`
+- **Stellar CLI** (>= 22.0.0): `curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh` or `cargo install --locked stellar-cli`
+  - *Note: The CLI was renamed from `soroban-cli` to `stellar-cli` in v27. Both `soroban` and `stellar` commands work.*
 - **jq** (JSON processor): `brew install jq` or `apt install jq`
 - **Node.js** 18+ (if running services directly)
 - **Freighter Wallet** browser extension
@@ -188,6 +189,14 @@ After startup:
 - **PostgreSQL:** localhost:5432 (user: `postgres`, password: `postgres`, db: `stellar_urithi_bidz`)
 
 > **Note:** Set `CONTRACT_ID` and `PINATA_JWT` in a `.env` file (or export them) before starting. The compose file reads them via `${CONTRACT_ID}` and `${PINATA_JWT}`.
+
+### 🚀 Live Testnet Contract
+
+**Contract ID:** `CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV`  
+**Network:** Stellar Testnet | **WASM:** 26 KB | **Tests:** 16/16  
+**Explorer:** [Stellar Lab](https://lab.stellar.org/r/testnet/contract/CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV) | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV)
+
+> Set `NEXT_PUBLIC_CONTRACT_ID` and `CONTRACT_ID` to the above ID in your `.env` files.
 
 ### 1. Smart Contracts
 
