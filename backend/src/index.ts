@@ -1,6 +1,9 @@
 // StellarUrithi-Bidz Backend Indexer & API Server
 // Main entry point — initializes database, starts event indexer, WebSocket, and REST API.
 
+// Load .env for local development (in Docker/production, env vars are injected directly)
+import "dotenv/config";
+
 import http from "http";
 import express from "express";
 import cors from "cors";
