@@ -67,6 +67,7 @@ export async function invokeContract(
   }
 
   // Step 2: Assemble the transaction with simulation results
+  // assembleTransaction returns a TransactionBuilder ready for signing
   const assembledTx = SorobanRpc.assembleTransaction(tx, simResponse);
 
   // Step 3: Sign via Freighter wallet
@@ -77,8 +78,10 @@ export async function invokeContract(
     if (!freighter?.signTransaction) {
       throw new Error("Freighter wallet not detected. Please install the Freighter extension.");
     }
+    // Get the assembled Transaction XDR for Freighter to sign
+    const txXdr = assembledTx.build().toXDR();
     const signedResult = await freighter.signTransaction(
-      assembledTx.build().toEnvelope().toXDR('base64'),
+      txXdr,
       { networkPassphrase: NETWORK_PASSPHRASE }
     );
     signedTxXdr = signedResult.signedTxXdr || signedResult;
@@ -89,7 +92,9 @@ export async function invokeContract(
   }
 
   // Step 4: Submit the signed transaction
-  const sendResponse = await rpc.sendTransaction(signedTxXdr);
+  // Reconstruct Transaction from signed XDR (sendTransaction expects Transaction, not string)
+  const signedTransaction = TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE);
+  const sendResponse = await rpc.sendTransaction(signedTransaction);
 
   if ("errorResultXdr" in sendResponse && sendResponse.errorResultXdr) {
     throw new Error(`Transaction failed: ${sendResponse.errorResultXdr}`);
