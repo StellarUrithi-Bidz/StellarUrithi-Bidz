@@ -140,11 +140,9 @@ pub fn commit_bid(
         timestamp: now,
     };
     env.storage().persistent().set(&key, &commitment_record);
-    env.storage().persistent().extend_ttl(
-        &key,
-        PERSISTENT_BUMP_THRESHOLD,
-        PERSISTENT_LIFETIME,
-    );
+    env.storage()
+        .persistent()
+        .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
 
     auction.bidder_count += 1;
     env.storage().persistent().set(&auction_key, &auction);

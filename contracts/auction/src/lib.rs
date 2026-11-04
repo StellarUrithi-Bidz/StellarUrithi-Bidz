@@ -155,11 +155,9 @@ impl UrithiAuction {
         // Persistent storage with TTL extension prevents ledger size exhaustion
         let key = StorageKey::Auction(auction_id);
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
 
         events::emit_auction_created(
             &env,
@@ -206,11 +204,9 @@ impl UrithiAuction {
         auction.status = Active;
 
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
         events::emit_attestation_recorded(&env, auction_id, &custodian);
     }
 
@@ -242,11 +238,9 @@ impl UrithiAuction {
         );
 
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
     }
 
     /// Cancel an auction before any bids are placed. Only the seller can cancel.
@@ -268,11 +262,9 @@ impl UrithiAuction {
 
         auction.status = Cancelled;
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
         events::emit_auction_cancelled(&env, auction_id, &auction.seller);
     }
 
@@ -380,11 +372,7 @@ impl UrithiAuction {
         bidder.require_auth();
 
         let refund_key = StorageKey::Refund(auction_id, bidder.clone());
-        let refund_amount: i128 = env
-            .storage()
-            .persistent()
-            .get(&refund_key)
-            .unwrap_or(0);
+        let refund_amount: i128 = env.storage().persistent().get(&refund_key).unwrap_or(0);
 
         assert!(refund_amount > 0, "No claimable refund");
 
@@ -459,11 +447,9 @@ impl UrithiAuction {
         }
 
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
     }
 
     /// Settle a closed auction: transfer NFT to winner, distribute proceeds.
@@ -519,11 +505,9 @@ impl UrithiAuction {
 
         auction.status = Settled;
         env.storage().persistent().set(&key, &auction);
-        env.storage().persistent().extend_ttl(
-            &key,
-            PERSISTENT_BUMP_THRESHOLD,
-            PERSISTENT_LIFETIME,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME);
 
         events::emit_auction_settled(
             &env,
