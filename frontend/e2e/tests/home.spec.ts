@@ -81,10 +81,10 @@ test.describe("Home Page — Browsing & Filtering", () => {
       await page.waitForTimeout(200);
     }
 
-    await expect(page.locator("text=Auctions").first()).toBeVisible();
-    await expect(page.locator("text=Create").first()).toBeVisible();
-    await expect(page.locator("text=My Bids").first()).toBeVisible();
-    await expect(page.locator("text=Admin").first()).toBeVisible();
+    await expect(page.locator("text=Auctions").filter({ visible: true }).first()).toBeVisible();
+    await expect(page.locator("text=Create").filter({ visible: true }).first()).toBeVisible();
+    await expect(page.locator("text=My Bids").filter({ visible: true }).first()).toBeVisible();
+    await expect(page.locator("text=Admin").filter({ visible: true }).first()).toBeVisible();
   });
 
   test("brand logo links back to home", async ({ page }) => {
