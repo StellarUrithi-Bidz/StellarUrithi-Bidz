@@ -38,10 +38,25 @@ jobs:
         run: npx tsc --noEmit
 
   test:
-    name: Unit Tests
+    name: Unit & Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: typecheck
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: stellar_urithi_bidz
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -61,3 +76,11 @@ jobs:
       - name: Run vitest
         working-directory: backend
         run: npx vitest run
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: stellar_urithi_bidz
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          CONTRACT_ID: CD_TEST_CONTRACT_ID
+          NODE_ENV: test
