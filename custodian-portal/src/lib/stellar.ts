@@ -99,14 +99,14 @@ export async function invokeContract(
   }
 
   // Step 5: Poll status
-  let status = sendResponse.status;
+  let status: string = sendResponse.status;
   let attempts = 0;
   while (status === "PENDING" && attempts < 15) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     attempts++;
     try {
       const txResult = await rpc.getTransaction(txHash);
-      status = txResult.status;
+      status = String(txResult.status);
       if (status === "SUCCESS") return { txHash, result: txResult };
       if (status === "FAILED") throw new Error(`Transaction ${txHash} failed on-chain`);
     } catch (pollErr: any) {
