@@ -13,10 +13,15 @@ const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "http://localhost:4000";
 
 // Singleton socket reference — shared across all hook instances
 let sharedSocket: Socket | null = null;
+
 function getSocket(): Socket {
-  if (!sharedSocket || !sharedSocket.connected) {
+  if (!sharedSocket) {
     sharedSocket = io(WS_URL, {
       transports: ["websocket", "polling"],
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
     });
   }
   return sharedSocket;
@@ -75,6 +80,11 @@ export interface AuctionSettledEvent {
   platform_fee: string;
 }
 
+export interface AuctionExtendedEvent {
+  auctionId: number;
+  newEndTime: number;
+}
+
 export interface AuctionCreatedEvent {
   id: number;
   seller: string;
@@ -92,6 +102,7 @@ export function useAuctionSocket(auctionId: number | null) {
   const [latestBid, setLatestBid] = useState<BidEvent | null>(null);
   const [auctionClosed, setAuctionClosed] = useState<AuctionClosedEvent | null>(null);
   const [auctionSettled, setAuctionSettled] = useState<AuctionSettledEvent | null>(null);
+  const [auctionExtended, setAuctionExtended] = useState<AuctionExtendedEvent | null>(null);
 
   useEffect(() => {
     if (!auctionId) return;
@@ -118,6 +129,10 @@ export function useAuctionSocket(auctionId: number | null) {
       setAuctionSettled(data);
     };
 
+    const onExtended = (data: AuctionExtendedEvent) => {
+      setAuctionExtended(data);
+    };
+
     const onCancelled = () => {
       setAuctionClosed({
         auctionId,
@@ -135,6 +150,7 @@ export function useAuctionSocket(auctionId: number | null) {
     socket.on("auction:new_bid", onNewBid);
     socket.on("auction:closed", onClosed);
     socket.on("auction:settled", onSettled);
+    socket.on("auction:extended", onExtended);
     socket.on("auction:cancelled", onCancelled);
 
     return () => {
@@ -144,13 +160,14 @@ export function useAuctionSocket(auctionId: number | null) {
       socket.off("auction:new_bid", onNewBid);
       socket.off("auction:closed", onClosed);
       socket.off("auction:settled", onSettled);
+      socket.off("auction:extended", onExtended);
       socket.off("auction:cancelled", onCancelled);
     };
   }, [auctionId]);
 
   const clearLatestBid = useCallback(() => setLatestBid(null), []);
 
-  return { isConnected, latestBid, auctionClosed, auctionSettled, clearLatestBid };
+  return { isConnected, latestBid, auctionClosed, auctionSettled, auctionExtended, clearLatestBid };
 }
 
 export function useBidderSocket(
