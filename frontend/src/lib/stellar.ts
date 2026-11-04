@@ -12,6 +12,7 @@ import {
   nativeToScVal,
   xdr,
 } from "@stellar/stellar-sdk";
+import { signTransaction as freighterSignTransaction } from "@stellar/freighter-api";
 
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet"
@@ -39,8 +40,7 @@ export function getRpcUrl(): string {
 
 // ── Contract Invocation ───────────────────────────────────────────────────────────
 // Complete flow: builds, simulates, signs via Freighter, and submits to Stellar.
-// Uses Freighter's signTransaction() for the user signature and SorobanRpc's
-// sendTransaction() for submission. Returns the transaction hash for tracking.
+// Polls until the transaction status is confirmed.
 
 export async function invokeContract(
   method: string,
@@ -62,37 +62,37 @@ export async function invokeContract(
 
   // Step 1: Simulate the transaction to get the proper resource fees
   const simResponse = await rpc.simulateTransaction(tx);
-  if ("error" in simResponse) {
+  if ("error" in simResponse && simResponse.error) {
     throw new Error(`Simulation failed: ${JSON.stringify(simResponse.error)}`);
   }
 
   // Step 2: Assemble the transaction with simulation results
-  // assembleTransaction returns a TransactionBuilder ready for signing
   const assembledTx = SorobanRpc.assembleTransaction(tx, simResponse);
 
   // Step 3: Sign via Freighter wallet
   let signedTxXdr: string;
   try {
-    // @ts-expect-error Freighter injects window.freighter at runtime
-    const freighter = window.freighter;
-    if (!freighter?.signTransaction) {
-      throw new Error("Freighter wallet not detected. Please install the Freighter extension.");
-    }
-    // Get the assembled Transaction XDR for Freighter to sign
     const txXdr = assembledTx.build().toXDR();
-    const signedResult = await freighter.signTransaction(
-      txXdr,
-      { networkPassphrase: NETWORK_PASSPHRASE }
-    );
-    signedTxXdr = signedResult.signedTxXdr || signedResult;
+    const signedResult = await freighterSignTransaction(txXdr, {
+      networkPassphrase: NETWORK_PASSPHRASE,
+    });
+    signedTxXdr = typeof signedResult === "string" ? signedResult : (signedResult as any).signedTxXdr || signedResult;
   } catch (err) {
-    throw new Error(
-      `Freighter signing failed: ${err instanceof Error ? err.message : String(err)}`
-    );
+    // Fallback to window.freighter if extension injected global
+    if (typeof window !== "undefined" && (window as any).freighter?.signTransaction) {
+      const txXdr = assembledTx.build().toXDR();
+      const signedResult = await (window as any).freighter.signTransaction(txXdr, {
+        networkPassphrase: NETWORK_PASSPHRASE,
+      });
+      signedTxXdr = (signedResult as any).signedTxXdr || signedResult;
+    } else {
+      throw new Error(
+        `Freighter signing failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   // Step 4: Submit the signed transaction
-  // Reconstruct Transaction from signed XDR (sendTransaction expects Transaction, not string)
   const signedTransaction = TransactionBuilder.fromXDR(signedTxXdr, NETWORK_PASSPHRASE);
   const sendResponse = await rpc.sendTransaction(signedTransaction);
 
@@ -100,14 +100,37 @@ export async function invokeContract(
     throw new Error(`Transaction failed: ${sendResponse.errorResultXdr}`);
   }
 
-  if ("hash" in sendResponse && sendResponse.hash) {
-    return {
-      txHash: sendResponse.hash,
-      result: sendResponse,
-    };
+  const txHash = sendResponse.hash;
+  if (!txHash) {
+    throw new Error("Transaction submission returned unexpected response");
   }
 
-  throw new Error("Transaction submission returned unexpected response");
+  // Step 5: Poll transaction status until confirmed (up to 30 seconds)
+  let status = sendResponse.status;
+  let attempts = 0;
+  while (status === "PENDING" && attempts < 15) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    attempts++;
+    try {
+      const txResult = await rpc.getTransaction(txHash);
+      status = txResult.status;
+      if (status === "SUCCESS") {
+        return { txHash, result: txResult };
+      }
+      if (status === "FAILED") {
+        throw new Error(`Transaction ${txHash} failed on-chain`);
+      }
+    } catch (pollErr: any) {
+      if (pollErr.message && pollErr.message.includes("failed on-chain")) {
+        throw pollErr;
+      }
+    }
+  }
+
+  return {
+    txHash,
+    result: sendResponse,
+  };
 }
 
 // ── Type Converters ───────────────────────────────────────────────────────────────
@@ -132,6 +155,14 @@ export function stringToScVal(value: string): xdr.ScVal {
   return nativeToScVal(value, { type: "string" });
 }
 
+export function boolToScVal(value: boolean): xdr.ScVal {
+  return nativeToScVal(value, { type: "bool" });
+}
+
+export function bytesNToScVal(bytes: Uint8Array): xdr.ScVal {
+  return nativeToScVal(bytes, { type: "bytes" });
+}
+
 // ── Event Parsing ─────────────────────────────────────────────────────────────────
 
 export function parseAuctionEvent(topics: xdr.ScVal[], data: xdr.ScVal): {
@@ -150,7 +181,6 @@ export function parseAuctionEvent(topics: xdr.ScVal[], data: xdr.ScVal): {
 
 export function formatStroops(amount: string | number): string {
   const num = typeof amount === "string" ? BigInt(amount) : BigInt(amount);
-  // XLM has 7 decimal places; adjust for other tokens
   const divisor = BigInt(10_000_000);
   const whole = num / divisor;
   const remainder = num % divisor;
