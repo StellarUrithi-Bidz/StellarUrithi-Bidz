@@ -110,6 +110,18 @@ export function initializeWebSocket(server: HttpServer): Server {
   return io;
 }
 
+export function broadcastAuctionCreated(auction: {
+  id: number;
+  seller: string;
+  format: string;
+  reserve_price: string;
+  end_time: number;
+  metadata_uri: string;
+}): void {
+  if (!io) return;
+  io.emit("auction:created", auction);
+}
+
 export function broadcastNewBid(auctionId: number, bid: { bidder: string; amount: string; timestamp: number; is_winning: boolean }): void {
   if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:new_bid", { auctionId, ...bid });
 }
@@ -120,9 +132,18 @@ export function broadcastBidRefunded(auctionId: number, bidder: string, amount: 
 export function broadcastAuctionExtended(auctionId: number, newEndTime: number): void {
   if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:extended", { auctionId, newEndTime });
 }
-export function broadcastAuctionClosed(auctionId: number, winner?: string, finalPrice?: string): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:closed", { auctionId, winner, finalPrice });
+export function broadcastAuctionClosed(auctionId: number, winner?: string, finalPrice?: string, format?: string): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:closed", { auctionId, winner, finalPrice, format });
 }
-export function broadcastAuctionSettled(auctionId: number): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:settled", { auctionId });
+export function broadcastAuctionSettled(
+  auctionId: number,
+  settlement?: { seller_proceeds: string; royalty_amount: string; platform_fee: string }
+): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:settled", { auctionId, ...settlement });
+}
+export function broadcastAuctionCancelled(auctionId: number): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:cancelled", { auctionId });
+}
+export function broadcastAttestationRecorded(auctionId: number, custodian: string): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:attested", { auctionId, custodian });
 }
