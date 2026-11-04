@@ -4,6 +4,10 @@
 
 use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
+// ── Storage TTL Constants ────────────────────────────────────────────────────────
+pub const PERSISTENT_BUMP_THRESHOLD: u32 = 17_280; // ~1 day in ledgers (at ~5s per ledger)
+pub const PERSISTENT_LIFETIME: u32 = 518_400; // ~30 days in ledgers
+
 // ── Auction Format Enum ──────────────────────────────────────────────────────────
 
 /// The auction format determines bidding mechanics and settlement logic.
@@ -73,17 +77,19 @@ pub enum ItemType {
 #[contracttype]
 #[derive(Clone)]
 pub enum StorageKey {
-    /// Maps auction_id -> Auction
+    /// Maps auction_id -> Auction (persistent storage)
     Auction(u64),
     /// Maps (auction_id, bidder) -> SealedBidCommitment (for sealed-bid commit phase)
     Commitment(u64, Address),
     /// Maps (auction_id, bidder) -> revealed bid amount (for sealed-bid reveal phase)
     RevealedBid(u64, Address),
-    /// Global auction counter
+    /// Maps (auction_id, bidder) -> claimable refund amount (pull payment pattern)
+    Refund(u64, Address),
+    /// Global auction counter (instance storage)
     AuctionCount,
-    /// Platform configuration
+    /// Platform configuration (instance storage)
     Config,
-    /// Platform fee wallet address (used for fee distribution on settlement)
+    /// Platform fee wallet address (instance storage)
     PlatformWallet,
 }
 
