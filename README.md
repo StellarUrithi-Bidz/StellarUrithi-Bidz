@@ -7,6 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Stellar](https://img.shields.io/badge/Stellar-Soroban-7B61FF)](https://stellar.org)
 [![Rust](https://img.shields.io/badge/Rust-soroban--sdk-orange)](https://soroban.stellar.org)
+[![CI](https://github.com/StellarUrithi-Bidz/StellarUrithi-Bidz/actions/workflows/contracts-build-and-test.yml/badge.svg)](https://github.com/StellarUrithi-Bidz/StellarUrithi-Bidz/actions)
 
 </div>
 
@@ -16,14 +17,17 @@
 
 **StellarUrithi-Bidz** is an open-source, on-chain auction protocol purpose-built for African art and cultural artifacts. Whether digital (NFTs) or physical (custodian-attested), every item is auctioned transparently on Stellar with escrowed bids and automatic royalty distribution.
 
-### Key Features
+### Key Features & Protocol Security
 
-- **Three Auction Formats**: English (ascending), Dutch (descending), and Sealed-Bid (commit-reveal)
-- **On-Chain Escrow**: All bids are locked in the contract until auction resolution — trustless and transparent
-- **Automatic Royalties**: Original creators receive their royalty on every hammer sale — no manual intervention
-- **Physical-Item Bridge**: Custodians/galleries attest to physical item possession before an auction opens
-- **Real-Time Updates**: WebSocket-powered live bid feed and auction state changes
-- **Low Fees**: Settled on Stellar for sub-second, near-zero-fee finality
+- **Three Auction Formats**: English (ascending), Dutch (descending), and Sealed-Bid (commit-reveal).
+- **Pull-Payment Escrow Security**: Outbid bidders and losers receive claimable balances via `withdraw_refund()`, eliminating push-payment loops and reentrancy/DoS vectors.
+- **Anti-Sniping Soft-Close Window**: Dynamic 5-minute extension when bids are placed near expiration to eliminate front-running sniping.
+- **Dutch Slippage Protection**: Optional `max_price` parameter in `buy_now` protecting buyers against execution at unacceptable prices.
+- **Cross-Auction Bound Commitments**: Sealed-bid commitments bind `(auction_id, bidder, amount, salt)` via HMAC-SHA256, preventing cross-auction replay attacks.
+- **Proactive State TTL Management**: Contract state is stored in Soroban `persistent()` storage with automatic TTL bumps (`518,400` ledgers) avoiding 64KB instance storage limits.
+- **Automatic Royalties**: Original creators receive royalties on every hammer sale directly from on-chain escrow.
+- **Physical-Item Bridge**: Authorized custodians cryptographically attest possession with SHA-256 document hashing before physical listings activate.
+- **Real-Time Updates**: WebSocket server with replay-protected Ed25519 signature authentication.
 
 ---
 
@@ -66,7 +70,7 @@
 
 ┌──────────────────────────────────────────────────────────────────┐
 │                    CUSTODIAN PORTAL (Next.js)                     │
-│  Physical-item attestation — upload IPFS docs, verify possession │
+│  Physical-item attestation — upload IPFS docs, SHA-256 hashing   │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,15 +85,15 @@ StellarUrithi-Bidz/
 │   └── auction/
 │       ├── Cargo.toml
 │       └── src/
-│           ├── lib.rs           # Contract entry point
-│           ├── types.rs         # Data structures & enums
-│           ├── english.rs       # English auction logic
-│           ├── dutch.rs         # Dutch auction logic
-│           ├── sealed_bid.rs    # Sealed-bid logic
-│           ├── escrow.rs        # Fund locking & refunds
+│           ├── lib.rs           # Contract entry point & pull-refund escrow
+│           ├── types.rs         # Data structures, storage keys & TTL constants
+│           ├── english.rs       # English ascending auction & anti-sniping
+│           ├── dutch.rs         # Dutch descending auction & slippage guard
+│           ├── sealed_bid.rs    # Sealed-bid commit-reveal logic
+│           ├── escrow.rs        # Fund locking & accounting
 │           ├── royalty.rs       # Royalty calculation & distribution
-│           ├── events.rs        # Event emission helpers
-│           └── test.rs          # Comprehensive test suite
+│           ├── events.rs        # Typed Soroban event emitters
+│           └── test.rs          # 19 comprehensive unit test suites
 │
 ├── backend/                     # Indexer & API Server
 │   ├── package.json
@@ -97,287 +101,93 @@ StellarUrithi-Bidz/
 │   └── src/
 │       ├── index.ts             # Main entry point
 │       ├── db/
-│       │   └── index.ts         # PostgreSQL connection & queries
+│       │   └── index.ts         # PostgreSQL connection & query helpers
 │       ├── indexer/
-│       │   └── event_indexer.ts # Stellar event poller
-│       ├── ws/
-│       │   └── socket_server.ts # WebSocket manager
+│       │   └── event_indexer.ts # Stellar Soroban RPC event listener
 │       ├── routes/
-│       │   └── auctions.ts      # REST API endpoints
-│       └── services/
-│           └── logger.ts        # Winston logger
+│       │   └── auctions.ts      # REST API endpoints & simulation
+│       ├── ws/
+│       │   └── socket_server.ts # WebSocket server with Ed25519 auth
+│       └── middleware/
+│           ├── auth.ts          # Ed25519 signature & replay cache
+│           └── rateLimiter.ts   # Request rate-limiting
 │
-├── frontend/                    # Main Web Application
-│   ├── package.json
-│   ├── next.config.js
-│   ├── tailwind.config.ts
-│   ├── tsconfig.json
-│   └── src/
-│       ├── app/
-│       │   ├── layout.tsx       # Root layout
-│       │   ├── page.tsx         # Home — auction listings
-│       │   ├── globals.css      # Global styles
-│       │   ├── auctions/[id]/   # Auction detail page
-│       │   ├── create/          # Create auction page
-│       │   ├── my-bids/         # Bid history page
-│       │   └── admin/           # Admin panel
-│       ├── components/
-│       │   ├── auction/
-│       │   │   └── AuctionCard.tsx
-│       │   └── layout/
-│       │       ├── Navbar.tsx
-│       │       └── Footer.tsx
-│       ├── hooks/
-│       │   └── useWebSocket.ts  # Real-time update hooks
-│       ├── lib/
-│       │   ├── api.ts           # Backend API client
-│       │   └── stellar.ts       # Stellar/Soroban helpers
-│       └── providers/
-│           └── wallet.tsx       # Freighter wallet provider
+├── frontend/                    # Main Auction UI (Next.js 14)
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx         # Auction marketplace feed
+│   │   │   ├── create/page.tsx  # On-chain auction creation
+│   │   │   └── auctions/[id]/   # Detail page (bid, buy now, commit/reveal)
+│   │   ├── lib/
+│   │   │   ├── stellar.ts       # Soroban RPC & Freighter invocation
+│   │   │   └── crypto.ts        # HMAC-SHA256 & salt utilities
+│   │   └── hooks/
+│   │       └── useWebSocket.ts  # Singleton live update hooks
 │
-├── custodian-portal/            # Custodian Admin App
-│   ├── package.json
-│   └── src/
-│       └── app/
-│           ├── layout.tsx
-│           ├── globals.css
-│           └── page.tsx         # Attestation dashboard
-│
-└── README.md
+└── custodian-portal/            # Physical Item Attestation UI (Next.js)
+    └── src/
+        ├── app/page.tsx         # Physical artifact inspection & verification
+        └── lib/stellar.ts       # Attestation contract caller & document hasher
 ```
 
 ---
 
 ## Getting Started
 
-### Prerequisites
-
-- **Docker** & **Docker Compose** (for one-command local dev)
-- **Rust** (1.75+) with `wasm32-unknown-unknown` target (for contracts)
-- **Stellar CLI** (>= 22.0.0): `curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh` or `cargo install --locked stellar-cli`
-  - *Note: The CLI was renamed from `soroban-cli` to `stellar-cli` in v27. Both `soroban` and `stellar` commands work.*
-- **jq** (JSON processor): `brew install jq` or `apt install jq`
-- **Node.js** 18+ (if running services directly)
-- **Freighter Wallet** browser extension
-- **Pinata** account (for IPFS storage)
-
-### Docker Quick Start (recommended)
-
-One command starts the full stack — PostgreSQL, backend, frontend, and custodian portal:
-
-```bash
-# Start all services
-docker compose up --build
-
-# Start in detached mode
-docker compose up --build -d
-
-# View logs
-docker compose logs -f
-
-# Stop everything
-docker compose down
-
-# Stop and remove volumes (resets database)
-docker compose down -v
-```
-
-After startup:
-- **Frontend:** http://localhost:3000
-- **Custodian Portal:** http://localhost:3001
-- **Backend API:** http://localhost:4000/api/health
-- **PostgreSQL:** localhost:5432 (user: `postgres`, password: `postgres`, db: `stellar_urithi_bidz`)
-
-> **Note:** Set `CONTRACT_ID` and `PINATA_JWT` in a `.env` file (or export them) before starting. The compose file reads them via `${CONTRACT_ID}` and `${PINATA_JWT}`.
-
-### 🚀 Live Testnet Contract
-
-**Contract ID:** `CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV`  
-**Network:** Stellar Testnet | **WASM:** 26 KB | **Tests:** 16/16  
-**Explorer:** [Stellar Lab](https://lab.stellar.org/r/testnet/contract/CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV) | [Stellar Expert](https://stellar.expert/explorer/testnet/contract/CD5HJY47FHBLTI5NQLUF6UM2ZYMNVG5OSCUANUME7DMVYC3FGLJWQTJV)
-
-> Set `NEXT_PUBLIC_CONTRACT_ID` and `CONTRACT_ID` to the above ID in your `.env` files.
-
 ### 1. Smart Contracts
-
-#### Quick Deploy (recommended)
-
-```bash
-# Interactive deployment wizard — guides you through everything
-./deploy.sh
-
-# Or use the Makefile directly
-make all
-```
-
-Both will: check prerequisites → build → test → deploy to testnet → initialize → verify.
-
-#### Manual Steps
 
 ```bash
 cd contracts
 
-# Build contracts
-make build-release
+# Run the 19 unit tests
+cargo test
 
-# Run tests
-make test
-
-# Generate identity & fund (testnet)
-make keys   # generates 'alice' identity
-make fund   # funds via Friendbot
-
-# Optimize WASM
-make optimize
-
-# Deploy to Stellar testnet
-make deploy-testnet
-
-# Initialize the contract
-make initialize
-
-# Verify deployment
-make verify
+# Build release WASM for Soroban
+cargo build --target wasm32-unknown-unknown --release
 ```
 
-#### Available Make Targets
-
-| Target | Description |
-|--------|-------------|
-| `make help` | Show all targets and variables |
-| `make build` | Compile debug |
-| `make build-release` | Compile release (optimized) |
-| `make test` | Run all tests |
-| `make test-verbose` | Run tests with full output |
-| `make optimize` | Strip & optimize WASM |
-| `make keys` | Generate testnet identity |
-| `make fund` | Fund via Friendbot |
-| `make deploy-testnet` | Deploy to testnet |
-| `make deploy-mainnet` | Deploy to mainnet ⚠️ |
-| `make initialize` | Initialize contract on-chain |
-| `make verify` | Query contract state |
-| `make verify-events` | Check emitted events |
-| `make demo` | Run end-to-end demo |
-| `make lint` | Clippy lint |
-| `make fmt` | Format code |
-| `make clean` | Remove build artifacts |
-| `make all` | Full pipeline |
-
-### 2. Backend Indexer
+### 2. Full-Stack with Docker Compose
 
 ```bash
-cd backend
-
-# Install dependencies
-npm install
-
-# Set environment variables
-cp .env.example .env
-# Edit .env with your Postgres credentials and contract ID
-
-# Start the indexer and API server
-npm run dev
+# Starts PostgreSQL, Backend, Frontend, and Custodian Portal
+docker compose up --build
 ```
 
-### 3. Frontend
-
-```bash
-cd frontend
-
-# Install dependencies
-npm install
-
-# Set environment variables
-cp .env.example .env.local
-
-# Start the development server
-npm run dev
-```
-
-Visit `http://localhost:3000` — connect your Freighter wallet and start bidding!
-
-### 4. Custodian Portal
-
-```bash
-cd custodian-portal
-
-npm install
-npm run dev
-```
-
-Visit `http://localhost:3001`
+Ports:
+- `:3000` — Main Frontend
+- `:3001` — Custodian Portal
+- `:4000` — Backend API & WebSocket
+- `:5432` — PostgreSQL
 
 ---
 
-## Environment Variables
+## Verification & Testing
 
-### Backend (`backend/.env.example`)
-
-```bash
-PORT=4000
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=stellar_urithi_bidz
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-STELLAR_RPC_URL=https://soroban-testnet.stellar.org
-CONTRACT_ID=<deployed_contract_address>
-FRONTEND_URL=http://localhost:3000
-```
-
-### Frontend (`frontend/.env.example`)
-
-```bash
-NEXT_PUBLIC_CONTRACT_ID=<deployed_contract_address>
-NEXT_PUBLIC_STELLAR_NETWORK=testnet
-NEXT_PUBLIC_API_URL=http://localhost:4000
-NEXT_PUBLIC_WS_URL=http://localhost:4000
-NEXT_PUBLIC_PINATA_GATEWAY=https://gateway.pinata.cloud
-```
+| Suite | Command | Details |
+| :--- | :--- | :--- |
+| **Contracts** | `cargo test --manifest-path contracts/Cargo.toml` | 19 tests passing: anti-sniping, slippage, pull refunds, fee overflow, sealed replay. |
+| **Backend** | `cd backend && npm test` | Vitest API, simulation, and Ed25519 replay protection tests. |
+| **Frontend** | `cd frontend && npm test` | Vitest components and utilities. |
+| **E2E** | `cd frontend && npm run test:e2e` | Playwright browser automated workflows. |
+| **Custodian** | `cd custodian-portal && npm test` | Custodian portal unit tests. |
 
 ---
 
-## Auction Formats
+## Security
 
-| Format | How It Works | Best For |
-|--------|-------------|----------|
-| **English** | Ascending bids. Highest bidder wins when timer expires. | Popular, well-known format. |
-| **Dutch** | Price drops over time. First to "buy now" wins instantly. | Quick sales, price discovery. |
-| **Sealed-Bid** | Bids are hidden (commit-reveal). Highest valid bid revealed at close. | High-value items, privacy-sensitive. |
+Please review [SECURITY.md](SECURITY.md) for responsible disclosure guidelines, bug bounty information, and our complete threat model.
 
-## Royalty Flow
+## Contributing
 
-Every hammer sale automatically distributes proceeds:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit conventions, style guides, and PR requirements.
 
-```
-Winning Bid (100%)
-├── Seller receives   (net after fees)
-├── Creator royalty   (royalty_bps / 10000 × bid)
-└── Platform fee      (platform_fee_bps / 10000 × bid)
-```
+## Code of Conduct
 
-Example: 1000 XLM bid with 5% royalty (500 bps) and 2.5% platform fee (250 bps):
-- Seller: **925 XLM**
-- Creator: **50 XLM**
-- Platform: **25 XLM**
-
----
-
-## Physical Item Bridge
-
-For physical artifacts, the flow includes a custodian attestation step:
-
-1. Seller lists item with `item_type: Physical` and assigns a custodian address
-2. Custodian inspects the physical item, uploads documentation (photos, condition report) to IPFS
-3. Custodian calls `attest_physical_item` on the contract with the IPFS hash
-4. Auction activates — bidding begins
-
-This ensures physical items are verified by a trusted third party before funds are committed.
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards adhering to Contributor Covenant v2.1.
 
 ---
 
 ## License
 
 MIT © StellarUrithi-Bidz Contributors
-
 Built with ❤️ for African art and culture. Powered by Stellar.
