@@ -100,6 +100,11 @@ describe("AuctionCard", () => {
     expect(screen.getByText("Ended")).toBeInTheDocument();
   });
 
+  it("renders closed status badge", () => {
+    render(<AuctionCard auction={createMockAuction({ status: "closed" })} />);
+    expect(screen.getByText("Closed")).toBeInTheDocument();
+  });
+
   it("renders time remaining for active auctions", () => {
     render(<AuctionCard auction={createMockAuction({ status: "active" })} />);
     expect(screen.getByTestId("icon-clock")).toBeInTheDocument();

@@ -22,13 +22,15 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
 
   const FormatIcon = formatLabel.icon;
 
-  const statusBadge = {
+  const statusBadge: Record<string, string> = {
     active: "bg-green-500/20 text-green-400 border-green-500/30",
     ended: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
     settled: "bg-blue-500/20 text-blue-400 border-blue-500/30",
     cancelled: "bg-red-500/20 text-red-400 border-red-500/30",
     created: "bg-white/5 text-white/50 border-white/10",
-  }[auction.status];
+    closed: "bg-gray-500/20 text-gray-400 border-gray-500/30",
+  };
+  const currentStatusBadge = statusBadge[auction.status] || "bg-white/5 text-white/50 border-white/10";
 
   // Extract IPFS hash from metadata URI for image display
   const ipfsHash = auction.metadata_uri.replace("ipfs://", "");
@@ -52,7 +54,7 @@ export default function AuctionCard({ auction }: AuctionCardProps) {
 
           {/* Status badge */}
           <div className="absolute top-3 left-3">
-            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${statusBadge}`}>
+            <span className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${currentStatusBadge}`}>
               {auction.status.charAt(0).toUpperCase() + auction.status.slice(1)}
             </span>
           </div>
