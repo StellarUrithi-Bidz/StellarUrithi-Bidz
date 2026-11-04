@@ -45,7 +45,19 @@ pub fn emit_bid_placed(env: &Env, record: &BidRecord) {
     );
 }
 
-/// Emitted when a previous bidder is refunded after being outbid.
+/// Emitted when an English auction deadline is extended due to anti-sniping.
+pub fn emit_auction_extended(env: &Env, auction_id: u64, new_end_time: u64) {
+    let topics = (symbol_short!("auc_ext"), auction_id);
+    env.events().publish(topics, (new_end_time,));
+}
+
+/// Emitted when an existing bidder is outbid and credit is made available for withdrawal.
+pub fn emit_bid_outbid(env: &Env, auction_id: u64, bidder: &Address, amount: i128) {
+    let topics = (symbol_short!("bid_out"), auction_id, bidder.clone());
+    env.events().publish(topics, (amount,));
+}
+
+/// Emitted when a bidder withdraws their refund.
 pub fn emit_bid_refunded(env: &Env, auction_id: u64, bidder: &Address, amount: i128) {
     let topics = (symbol_short!("bid_ref"), auction_id, bidder.clone());
     env.events().publish(topics, (amount,));
