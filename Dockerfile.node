@@ -3,14 +3,6 @@
 # Uses multi-stage builds for smaller, more secure images.
 # Stage 1 (build): Install dependencies only — cached until package.json changes.
 # Stage 2 (run):  Copy built artifacts, run as non-root 'node' user.
-#
-# Build:
-#   docker build -f Dockerfile.node
-#     --build-arg APP_DIR=/app/backend
-#     -t urithi-backend .
-#
-# Run:
-#   docker run -p 4000:4000 urithi-backend
 
 # ── Stage 1: Build ─────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS build
@@ -42,8 +34,9 @@ WORKDIR ${APP_DIR}
 # Copy node_modules from build stage
 COPY --from=build --chown=urithi:urithi ${APP_DIR}/node_modules ./node_modules
 
-# Copy application source
+# Copy application source and ensure cache directories are writable by non-root user
 COPY --chown=urithi:urithi . .
+RUN mkdir -p ${APP_DIR}/.next && chown -R urithi:urithi ${APP_DIR}/.next
 
 # Drop root privileges
 USER urithi
@@ -63,4 +56,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:${PORT:-4000}/api/health || exit 1
 
 # Default command; overridden per service in docker-compose
-CMD ["node", "dist/index.js"]
+CMD ["npm", "start"]
