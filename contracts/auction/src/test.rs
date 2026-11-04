@@ -105,7 +105,7 @@ fn create_test_auction(
                 price_decay_per_second: 0,
                 commit_deadline: commit,
                 reveal_deadline: reveal,
-                max_bidders: 10,
+                max_bidders: 0,
             })
         }
     }
@@ -191,6 +191,12 @@ fn test_english_auction_full_flow() {
     assert_eq!(a.highest_bid, 350);
     assert_eq!(a.highest_bidder.unwrap(), bidder2);
 
+    // Verify pull-payment refund credited to bidder1
+    assert_eq!(client.get_claimable_refund(&auction_id, &bidder1), 200);
+    let refunded = client.withdraw_refund(&auction_id, &bidder1);
+    assert_eq!(refunded, 200);
+    assert_eq!(client.get_claimable_refund(&auction_id, &bidder1), 0);
+
     env.ledger().set_timestamp(env.ledger().timestamp() + 4000);
     // Must approve BEFORE close — approve_nft_transfer requires Created or Active
     client.approve_nft_transfer(&auction_id);
@@ -202,6 +208,29 @@ fn test_english_auction_full_flow() {
         client.get_auction(&auction_id).status,
         AuctionStatus::Settled
     );
+}
+
+#[test]
+fn test_english_auction_anti_sniping() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
+    let seller = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let bidder = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &pt).mint(&bidder, &10_000i128);
+
+    let aid = create_test_auction(&client, &seller, &creator, &pt, AuctionFormat::English);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 120);
+    client.activate_auction(&aid);
+
+    let original_end = client.get_auction(&aid).end_time;
+    // Advance to 60 seconds before end time (inside the 300s anti-snipe window)
+    env.ledger().set_timestamp(original_end - 60);
+    client.place_bid(&aid, &bidder, &150i128);
+
+    let new_end = client.get_auction(&aid).end_time;
+    assert!(new_end > original_end);
 }
 
 #[test]
@@ -226,17 +255,17 @@ fn test_english_bid_too_low_increment_fails() {
     let env = Env::default();
     env.mock_all_auths_allowing_non_root_auth();
     let (client, _a, _p, pt, _nft) = setup_contract(&env);
-    let s = Address::generate(&env);
-    let c = Address::generate(&env);
-    let b1 = Address::generate(&env);
-    let b2 = Address::generate(&env);
-    token::StellarAssetClient::new(&env, &pt).mint(&b1, &10_000i128);
-    token::StellarAssetClient::new(&env, &pt).mint(&b2, &10_000i128);
-    let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::English);
+    let seller = Address::generate(&env);
+    let creator = Address::generate(&env);
+    let bidder1 = Address::generate(&env);
+    let bidder2 = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &pt).mint(&bidder1, &10_000i128);
+    token::StellarAssetClient::new(&env, &pt).mint(&bidder2, &10_000i128);
+    let aid = create_test_auction(&client, &seller, &creator, &pt, AuctionFormat::English);
     env.ledger().set_timestamp(env.ledger().timestamp() + 120);
     client.activate_auction(&aid);
-    client.place_bid(&aid, &b1, &200i128);
-    client.place_bid(&aid, &b2, &205i128);
+    client.place_bid(&aid, &bidder1, &100i128);
+    client.place_bid(&aid, &bidder2, &105i128);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -257,11 +286,29 @@ fn test_dutch_auction_full_flow() {
     client.activate_auction(&aid);
     env.ledger().set_timestamp(env.ledger().timestamp() + 140);
     assert_eq!(client.get_dutch_price(&aid), 800);
-    client.buy_now(&aid, &buyer);
+    client.buy_now(&aid, &buyer, &Some(850i128));
     let a = client.get_auction(&aid);
     assert_eq!(a.status, AuctionStatus::Ended);
     assert_eq!(a.highest_bid, 800);
     assert_eq!(a.highest_bidder.unwrap(), buyer);
+}
+
+#[test]
+#[should_panic(expected = "Current price exceeds max acceptable price")]
+fn test_dutch_slippage_protection_fails() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (client, _a, _p, pt, _nft) = setup_contract(&env);
+    let s = Address::generate(&env);
+    let c = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &pt).mint(&buyer, &10_000i128);
+    let aid = create_test_auction(&client, &s, &c, &pt, AuctionFormat::Dutch);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 120);
+    client.activate_auction(&aid);
+    // Price at 140s decay is 800; passing max_price of 750 will fail
+    env.ledger().set_timestamp(env.ledger().timestamp() + 140);
+    client.buy_now(&aid, &buyer, &Some(750i128));
 }
 
 #[test]
@@ -320,6 +367,12 @@ fn test_sealed_bid_full_flow() {
     assert_eq!(a.status, AuctionStatus::Ended);
     assert_eq!(a.highest_bid, 500);
     assert_eq!(a.highest_bidder.unwrap(), b2);
+
+    // Verify pull refund for b1 (losing bidder)
+    assert_eq!(client.get_claimable_refund(&aid, &b1), 300);
+    let refunded = client.withdraw_refund(&aid, &b1);
+    assert_eq!(refunded, 300);
+    assert_eq!(client.get_claimable_refund(&aid, &b1), 0);
 }
 
 #[test]
@@ -491,7 +544,7 @@ fn test_sealed_bid_refund_unrevealed() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-//  Royalty
+//  Royalty & Fee Tests
 // ═════════════════════════════════════════════════════════════════════════════
 
 #[test]
@@ -502,6 +555,43 @@ fn test_royalty_calculation() {
     assert_eq!(b.platform_fee_amount, 25);
     assert_eq!(b.seller_amount, 925);
     assert_eq!(b.total, 1000);
+}
+
+#[test]
+#[should_panic(expected = "Combined royalty and platform fee exceeds 100%")]
+fn test_combined_fee_overflow_panics() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (client, admin, _pw, payment_token, _nft) = setup_contract(&env);
+    client.update_config(&admin, &Option::None, &Option::Some(9900u32), &Option::None);
+    let seller = Address::generate(&env);
+    let creator = Address::generate(&env);
+
+    let now = env.ledger().timestamp();
+    let item = ItemType::Digital(DigitalItem {
+        nft_contract: payment_token.clone(),
+        token_id: 1,
+    });
+
+    // 9800 bps royalty + 250 bps default platform fee = 10050 bps > 10000 bps
+    client.create_auction(&CreateAuctionParams {
+        seller: seller.clone(),
+        original_creator: creator.clone(),
+        format: AuctionFormat::English,
+        item,
+        payment_token: payment_token.clone(),
+        reserve_price: 100,
+        royalty_bps: 9800,
+        start_time: now + 60,
+        end_time: now + 3600,
+        metadata_uri: String::from_str(&client.env, "ipfs://overflow"),
+        min_increment: 10,
+        start_price: 0,
+        price_decay_per_second: 0,
+        commit_deadline: 0,
+        reveal_deadline: 0,
+        max_bidders: 0,
+    });
 }
 
 #[test]
