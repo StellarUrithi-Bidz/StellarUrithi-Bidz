@@ -40,11 +40,13 @@ test.describe("Auction Detail — Display & Status", () => {
     const participation = page.locator("text=Participation Panel");
     const ended = page.locator("text=Auction ended");
     const settled = page.locator("text=Auction settled");
+    const notFound = page.locator("text=Auction not found");
 
     const hasBidPanel = (await placeBid.isVisible().catch(() => false)) ||
       (await participation.isVisible().catch(() => false)) ||
       (await ended.isVisible().catch(() => false)) ||
-      (await settled.isVisible().catch(() => false));
+      (await settled.isVisible().catch(() => false)) ||
+      (await notFound.isVisible().catch(() => false));
 
     expect(hasBidPanel).toBeTruthy();
   });

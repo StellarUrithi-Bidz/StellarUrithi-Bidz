@@ -13,7 +13,7 @@ export class CreateAuctionPage {
   constructor(page: Page) {
     this.page = page;
     this.heading = page.locator("h1");
-    this.stepIndicators = page.locator('[class*="rounded-full"]');
+    this.stepIndicators = page.locator('.w-9.h-9.rounded-full');
     this.formatOptions = page.locator("button").filter({ hasText: /^(English|Dutch|Sealed-Bid)/ });
     this.continueButton = page.locator("button").filter({ hasText: "Continue →" });
     this.backButton = page.locator("button").filter({ hasText: "← Back" });

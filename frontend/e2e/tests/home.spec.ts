@@ -75,6 +75,12 @@ test.describe("Home Page — Browsing & Filtering", () => {
   test("navbar has all navigation links", async ({ page }) => {
     await page.goto("/");
 
+    const hamburger = page.locator("button.md\\:hidden");
+    if (await hamburger.isVisible()) {
+      await hamburger.click();
+      await page.waitForTimeout(200);
+    }
+
     await expect(page.locator("text=Auctions").first()).toBeVisible();
     await expect(page.locator("text=Create").first()).toBeVisible();
     await expect(page.locator("text=My Bids").first()).toBeVisible();

@@ -3,27 +3,33 @@ import { test, expect } from "@playwright/test";
 import { mockConnectedWallet, navigateTo, clickButton } from "../utils/mock-wallet";
 
 test.describe("Navigation & Routing", () => {
+  async function clickNavLink(page: any, path: string, label: string) {
+    await page.goto(path);
+    const hamburger = page.locator("button.md\\:hidden");
+    if (await hamburger.isVisible()) {
+      await hamburger.click();
+      await page.waitForTimeout(200);
+    }
+    await page.locator(`a:has-text('${label}')`).last().click();
+  }
+
   test("navbar link: Auctions navigates to home", async ({ page }) => {
-    await page.goto("/create");
-    await page.locator("a:has-text('Auctions')").first().click();
+    await clickNavLink(page, "/create", "Auctions");
     await expect(page).toHaveURL("/");
   });
 
   test("navbar link: Create navigates to create page", async ({ page }) => {
-    await page.goto("/");
-    await page.locator("a:has-text('Create')").first().click();
+    await clickNavLink(page, "/", "Create");
     await expect(page).toHaveURL("/create");
   });
 
   test("navbar link: My Bids navigates to my-bids page", async ({ page }) => {
-    await page.goto("/");
-    await page.locator("a:has-text('My Bids')").first().click();
+    await clickNavLink(page, "/", "My Bids");
     await expect(page).toHaveURL("/my-bids");
   });
 
   test("navbar link: Admin navigates to admin page", async ({ page }) => {
-    await page.goto("/");
-    await page.locator("a:has-text('Admin')").first().click();
+    await clickNavLink(page, "/", "Admin");
     await expect(page).toHaveURL("/admin");
   });
 
@@ -51,7 +57,7 @@ test.describe("My Bids Page", () => {
     await page.waitForTimeout(1500);
 
     // Page title should be visible
-    await expect(page.locator("text=My Bids")).toBeVisible();
+    await expect(page.locator("h1:has-text('My Bids')")).toBeVisible();
     await expect(page.locator("text=Track your bidding activity")).toBeVisible();
   });
 
