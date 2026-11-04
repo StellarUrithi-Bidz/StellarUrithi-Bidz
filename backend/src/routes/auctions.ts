@@ -5,7 +5,7 @@
 import { Router, Request, Response } from "express";
 import {
   getAuction, getAuctions, getBidsForAuction,
-  getBidHistory, getAnalytics,
+  getBidHistory, getAnalytics, checkDatabaseHealth,
 } from "../db";
 import { logger } from "../services/logger";
 import { validate } from "../middleware/validate";
@@ -17,6 +17,17 @@ import {
 import { strictRateLimiter } from "../middleware/rateLimiter";
 
 const router = Router();
+
+// GET /api/health — Service and database health check
+router.get("/health", async (_req: Request, res: Response) => {
+  const dbHealthy = await checkDatabaseHealth();
+  const status = dbHealthy ? 200 : 503;
+  res.status(status).json({
+    status: dbHealthy ? "healthy" : "unhealthy",
+    database: dbHealthy ? "connected" : "disconnected",
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // GET /api — List auctions with optional filters
 router.get("/", validate(listAuctionsSchema), async (req: Request, res: Response) => {
@@ -58,6 +69,38 @@ router.get("/analytics", async (_req: Request, res: Response) => {
   }
 });
 
+// POST /api/simulate-create — Pre-flight parameter validation and fee breakdown
+router.post("/simulate-create", validate(createAuctionBodySchema, "body"), async (req: Request, res: Response) => {
+  try {
+    const body = req.body;
+    const royaltyBps = body.royalty_bps || 0;
+    const platformFeeBps = body.platform_fee_bps || 250;
+
+    if (royaltyBps + platformFeeBps > 10_000) {
+      res.status(400).json({
+        success: false,
+        error: "Combined royalty and platform fee exceeds 10,000 basis points (100%)",
+      });
+      return;
+    }
+
+    const sellerProceedsBps = 10_000 - (royaltyBps + platformFeeBps);
+    res.json({
+      success: true,
+      simulation: {
+        valid: true,
+        royalty_bps: royaltyBps,
+        platform_fee_bps: platformFeeBps,
+        seller_proceeds_bps: sellerProceedsBps,
+        estimated_start_time: body.start_time,
+        estimated_end_time: body.end_time,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Failed to simulate auction creation" });
+  }
+});
+
 // GET /api/:id — Get single auction detail
 router.get("/:id", validate(auctionIdSchema, "params"), async (req: Request, res: Response) => {
   try {
@@ -78,6 +121,52 @@ router.get("/:id/bids", validate(auctionIdSchema, "params"), async (req: Request
     res.json({ success: true, data: bids });
   } catch (err) {
     res.status(500).json({ success: false, error: "Failed to fetch bids" });
+  }
+});
+
+// POST /api/:id/simulate-bid — Pre-flight validation for a prospective bid
+router.post("/:id/simulate-bid", validate(auctionIdSchema, "params"), validate(placeBidBodySchema, "body"), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params as unknown as { id: number };
+    const body = req.body;
+    const auction = await getAuction(id);
+    if (!auction) {
+      res.status(404).json({ success: false, error: "Auction not found" });
+      return;
+    }
+
+    if (auction.status !== "active" && auction.status !== "created") {
+      res.status(400).json({ success: false, error: `Auction is ${auction.status}, bids not accepted` });
+      return;
+    }
+
+    const currentHighest = BigInt(auction.highest_bid || "0");
+    const reservePrice = BigInt(auction.reserve_price || "0");
+    const minIncrement = BigInt(auction.min_increment || "0");
+    const proposedBid = BigInt(body.bid_amount);
+
+    const minRequired = currentHighest === 0n ? reservePrice : currentHighest + minIncrement;
+    if (proposedBid < minRequired) {
+      res.status(400).json({
+        success: false,
+        error: `Bid too low. Minimum required: ${minRequired.toString()}`,
+        current_highest: currentHighest.toString(),
+        minimum_required: minRequired.toString(),
+      });
+      return;
+    }
+
+    res.json({
+      success: true,
+      simulation: {
+        valid: true,
+        proposed_bid: proposedBid.toString(),
+        previous_highest: currentHighest.toString(),
+        outbid_address: auction.highest_bidder || null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: "Failed to simulate bid" });
   }
 });
 
@@ -120,6 +209,5 @@ router.post("/:id/bids", strictRateLimiter,
       res.status(500).json({ success: false, error: "Failed to place bid" });
     }
 });
-
 
 export default router;
