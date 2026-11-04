@@ -62,11 +62,15 @@ jobs:
         working-directory: contracts
         run: cargo build --target wasm32-unknown-unknown --release
 
-      - name: Verify WASM artifact
+      - name: Verify WASM artifact and size threshold
         run: |
           WASM="contracts/target/wasm32-unknown-unknown/release/stellar_urithi_auction.wasm"
           if [ -f "$WASM" ]; then
-            echo "✅ WASM built: $(ls -lh "$WASM" | awk '{print $5}')"
+            SIZE=$(stat -c%s "$WASM" 2>/dev/null || wc -c < "$WASM")
+            echo "✅ WASM built successfully: ${SIZE} bytes"
+            if [ "$SIZE" -gt 131072 ]; then
+              echo "⚠️ Notice: WASM binary size exceeds 128KB recommended boundary"
+            fi
           else
             echo "❌ WASM not found at $WASM"
             exit 1
