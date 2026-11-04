@@ -18,11 +18,23 @@ const authenticatedSockets = new Map<string, Set<string>>();
 const serverNonces = new Map<string, { nonce: string; expires: number }>();
 const AUTH_NONCE_MAX_AGE_MS = 5 * 60 * 1000;
 
+// Periodic cleanup of expired server nonces to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [address, entry] of serverNonces.entries()) {
+    if (now > entry.expires) {
+      serverNonces.delete(address);
+    }
+  }
+}, 60 * 1000).unref();
+
 function verifyStellarSignature(address: string, message: string, signedMessage: string): boolean {
   try {
     const prefix = "stellar-urithi-bidz-auth:";
     if (!message.startsWith(prefix)) { logger.warn(`Auth message missing prefix for ${address}`); return false; }
-    const nonce = message.slice(prefix.length);
+    const nonce = message.slice(prefix.length).trim();
+    if (!nonce) { logger.warn(`Auth message missing nonce for ${address}`); return false; }
+
     // Server nonce check
     const serverNonce = serverNonces.get(address);
     if (serverNonce) {
@@ -31,10 +43,16 @@ function verifyStellarSignature(address: string, message: string, signedMessage:
       serverNonces.delete(address);
     } else {
       // Fallback: client timestamp nonce with freshness check
-      const nonceMs = parseInt(nonce, 10);
-      if (!isNaN(nonceMs)) {
-        const age = Date.now() - nonceMs;
-        if (age > AUTH_NONCE_MAX_AGE_MS || age < 0) { logger.warn(`Auth nonce expired for ${address}`); return false; }
+      const timestampPart = nonce.split(":")[0];
+      const nonceMs = parseInt(timestampPart, 10);
+      if (isNaN(nonceMs) || !/^\d+$/.test(timestampPart)) {
+        logger.warn(`Auth nonce invalid format for ${address}: ${nonce}`);
+        return false;
+      }
+      const age = Date.now() - nonceMs;
+      if (age > AUTH_NONCE_MAX_AGE_MS || age < -30000) {
+        logger.warn(`Auth nonce expired for ${address}: age=${age}ms`);
+        return false;
       }
     }
     const keypair = Keypair.fromPublicKey(address);
@@ -99,20 +117,12 @@ export function broadcastBidRefunded(auctionId: number, bidder: string, amount: 
   if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:bid_refunded", { auctionId, bidder, amount });
   io.to(`${BIDDER_ROOM_PREFIX}${bidder}`).emit("bidder:refunded", { auctionId, amount });
 }
-export function broadcastAuctionClosed(auctionId: number, winner: string, winningBid: string, format: string): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:closed", { auctionId, winner, winningBid, format });
-  io.to(`${BIDDER_ROOM_PREFIX}${winner}`).emit("bidder:won", { auctionId, winningBid });
+export function broadcastAuctionExtended(auctionId: number, newEndTime: number): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:extended", { auctionId, newEndTime });
 }
-export function broadcastAuctionSettled(auctionId: number, data: { seller_proceeds: string; royalty_amount: string; platform_fee: string }): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:settled", { auctionId, ...data });
+export function broadcastAuctionClosed(auctionId: number, winner?: string, finalPrice?: string): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:closed", { auctionId, winner, finalPrice });
 }
-export function broadcastAuctionCancelled(auctionId: number): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:cancelled", { auctionId });
+export function broadcastAuctionSettled(auctionId: number): void {
+  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:settled", { auctionId });
 }
-export function broadcastAuctionCreated(auction: { id: number; seller: string; format: string; reserve_price: string; end_time: number; metadata_uri: string }): void {
-  if (!io) return; io.emit("auction:created", auction);
-}
-export function broadcastAttestationRecorded(auctionId: number, custodian: string): void {
-  if (!io) return; io.to(`${AUCTION_ROOM_PREFIX}${auctionId}`).emit("auction:attested", { auctionId, custodian });
-}
-export function getIO(): Server | null { return io; }
