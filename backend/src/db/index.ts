@@ -30,7 +30,7 @@ export async function initializeDatabase(): Promise<void> {
         original_creator VARCHAR(56) NOT NULL,
         format VARCHAR(20) NOT NULL CHECK (format IN ('english', 'dutch', 'sealed_bid')),
         status VARCHAR(20) NOT NULL DEFAULT 'created'
-          CHECK (status IN ('created', 'active', 'ended', 'settled', 'cancelled')),
+          CHECK (status IN ('created', 'active', 'ended', 'closed', 'settled', 'cancelled')),
         item_type VARCHAR(20) NOT NULL CHECK (item_type IN ('digital', 'physical')),
         nft_contract VARCHAR(56), token_id BIGINT, custodian VARCHAR(56),
         attestation_hash VARCHAR(64), payment_token VARCHAR(56) NOT NULL,
@@ -90,6 +90,92 @@ export async function upsertAuction(auction: AuctionRecord): Promise<void> {
     `INSERT INTO auctions (id, seller, original_creator, format, status, item_type, nft_contract, token_id, custodian, attestation_hash, payment_token, reserve_price, royalty_bps, platform_fee_bps, start_time, end_time, commit_deadline, reveal_deadline, metadata_uri, min_increment, start_price, price_decay_per_second, highest_bidder, highest_bid, current_dutch_price, attested, seller_proceeds, royalty_amount, platform_fee_amount) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) ON CONFLICT (id) DO UPDATE SET status=EXCLUDED.status,highest_bidder=EXCLUDED.highest_bidder,highest_bid=EXCLUDED.highest_bid,current_dutch_price=EXCLUDED.current_dutch_price,attested=EXCLUDED.attested,seller_proceeds=EXCLUDED.seller_proceeds,royalty_amount=EXCLUDED.royalty_amount,platform_fee_amount=EXCLUDED.platform_fee_amount,settled_at=EXCLUDED.settled_at`,
     [auction.id, auction.seller, auction.original_creator, auction.format, auction.status, auction.item_type, auction.nft_contract, auction.token_id, auction.custodian, auction.attestation_hash, auction.payment_token, auction.reserve_price, auction.royalty_bps, auction.platform_fee_bps, auction.start_time, auction.end_time, auction.commit_deadline, auction.reveal_deadline, auction.metadata_uri, auction.min_increment, auction.start_price, auction.price_decay_per_second, auction.highest_bidder, auction.highest_bid, auction.current_dutch_price, auction.attested, auction.seller_proceeds, auction.royalty_amount, auction.platform_fee_amount]
   );
+}
+
+export async function updateAuctionOnBid(
+  auctionId: number,
+  highestBidder: string,
+  highestBid: string
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // Outbid previous winning bids for this auction
+    await client.query(
+      "UPDATE bids SET is_winning = false WHERE auction_id = $1 AND is_winning = true",
+      [auctionId]
+    );
+    // Update highest bid and status in auctions
+    await client.query(
+      "UPDATE auctions SET highest_bidder = $1, highest_bid = $2, status = 'active' WHERE id = $3",
+      [highestBidder, highestBid, auctionId]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateAuctionOnClose(
+  auctionId: number,
+  status: string = "closed",
+  highestBidder?: string,
+  highestBid?: string
+): Promise<void> {
+  if (highestBidder && highestBid) {
+    await pool.query(
+      "UPDATE auctions SET status = $1, highest_bidder = $2, highest_bid = $3 WHERE id = $4",
+      [status, highestBidder, highestBid, auctionId]
+    );
+  } else {
+    await pool.query("UPDATE auctions SET status = $1 WHERE id = $2", [status, auctionId]);
+  }
+}
+
+export async function updateAuctionOnSettle(
+  auctionId: number,
+  sellerProceeds?: string,
+  royaltyAmount?: string,
+  platformFeeAmount?: string
+): Promise<void> {
+  await pool.query(
+    "UPDATE auctions SET status = 'settled', seller_proceeds = COALESCE($1, seller_proceeds), royalty_amount = COALESCE($2, royalty_amount), platform_fee_amount = COALESCE($3, platform_fee_amount), settled_at = NOW() WHERE id = $4",
+    [sellerProceeds || null, royaltyAmount || null, platformFeeAmount || null, auctionId]
+  );
+}
+
+export async function updateAuctionOnCancel(auctionId: number): Promise<void> {
+  await pool.query("UPDATE auctions SET status = 'cancelled' WHERE id = $1", [auctionId]);
+}
+
+export async function updateAuctionOnAttestation(
+  auctionId: number,
+  attestationHash: string
+): Promise<void> {
+  await pool.query(
+    "UPDATE auctions SET attested = true, attestation_hash = $1 WHERE id = $2",
+    [attestationHash, auctionId]
+  );
+}
+
+export async function markBidRefunded(auctionId: number, bidder: string): Promise<void> {
+  await pool.query(
+    "UPDATE bids SET refunded = true, is_winning = false WHERE auction_id = $1 AND bidder = $2",
+    [auctionId, bidder]
+  );
+}
+
+export async function checkDatabaseHealth(): Promise<boolean> {
+  try {
+    const res = await pool.query("SELECT 1 AS ok");
+    return res.rows[0]?.ok === 1;
+  } catch (err) {
+    logger.error("Database health check failed:", err);
+    return false;
+  }
 }
 
 export async function insertBid(bid: BidRecord): Promise<void> {
@@ -156,7 +242,7 @@ export { pool };
 export interface AuctionRecord {
   id: number; seller: string; original_creator: string;
   format: "english"|"dutch"|"sealed_bid";
-  status: "created"|"active"|"ended"|"settled"|"cancelled";
+  status: "created"|"active"|"ended"|"closed"|"settled"|"cancelled";
   item_type: "digital"|"physical"; nft_contract?: string; token_id?: number;
   custodian?: string; attestation_hash?: string; payment_token: string;
   reserve_price: string; royalty_bps: number; platform_fee_bps: number;
