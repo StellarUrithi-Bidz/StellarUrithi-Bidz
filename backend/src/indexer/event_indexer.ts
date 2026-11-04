@@ -2,7 +2,12 @@
 // Handles Address, Symbol, String, and scalar topic values correctly.
 
 import { SorobanRpc, xdr, scValToNative, Address } from "@stellar/stellar-sdk";
-import { upsertAuction, insertBid, insertEvent, saveCursor, loadCursor, AuctionRecord, BidRecord } from "../db";
+import {
+  upsertAuction, insertBid, insertEvent, saveCursor, loadCursor,
+  updateAuctionOnBid, updateAuctionOnClose, updateAuctionOnSettle,
+  updateAuctionOnCancel, updateAuctionOnAttestation, markBidRefunded,
+  AuctionRecord, BidRecord
+} from "../db";
 import { logger } from "../services/logger";
 
 interface IndexerConfig { rpcUrl: string; contractId: string; pollIntervalMs: number; batchSize: number; maxRetries: number; }
@@ -70,15 +75,50 @@ const handlers: Record<string, EventHandler> = {
     await insertEvent({ event_type: "auction_created", auction_id: auctionId, data: record as unknown as Record<string,unknown>, ledger_sequence: ledgerSeq, tx_hash: txHash });
   },
   bid_placed: async (auctionId, data, ledgerSeq, txHash) => {
-    const bid: BidRecord = { auction_id: auctionId, bidder: (data.bidder as string)||"", amount: String(data.amount||"0"), format: mapFormat(data.format as string), timestamp: (data.timestamp as number)||Date.now(), is_winning: true };
+    const bidder = (data.bidder as string) || "";
+    const amount = String(data.amount || "0");
+    const bid: BidRecord = { auction_id: auctionId, bidder, amount, format: mapFormat(data.format as string), timestamp: (data.timestamp as number)||Date.now(), is_winning: true };
     await insertBid(bid);
+    await updateAuctionOnBid(auctionId, bidder, amount);
     await insertEvent({ event_type: "bid_placed", auction_id: auctionId, data: bid as unknown as Record<string,unknown>, ledger_sequence: ledgerSeq, tx_hash: txHash });
   },
-  bid_refunded: async (auctionId, data, ledgerSeq, txHash) => { await insertEvent({ event_type: "bid_refunded", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash }); },
-  auction_closed: async (auctionId, data, ledgerSeq, txHash) => { await insertEvent({ event_type: "auction_closed", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash }); },
-  auction_settled: async (auctionId, data, ledgerSeq, txHash) => { await insertEvent({ event_type: "auction_settled", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash }); },
-  auction_cancelled: async (auctionId, data, ledgerSeq, txHash) => { await insertEvent({ event_type: "auction_cancelled", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash }); },
-  attestation_recorded: async (auctionId, data, ledgerSeq, txHash) => { await insertEvent({ event_type: "attestation_recorded", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash }); },
+  bid_refunded: async (auctionId, data, ledgerSeq, txHash) => {
+    const bidder = (data.bidder as string) || "";
+    await markBidRefunded(auctionId, bidder);
+    await insertEvent({ event_type: "bid_refunded", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  auction_closed: async (auctionId, data, ledgerSeq, txHash) => {
+    const winner = data.winner ? String(data.winner) : undefined;
+    const finalPrice = data.final_price ? String(data.final_price) : undefined;
+    await updateAuctionOnClose(auctionId, "closed", winner, finalPrice);
+    await insertEvent({ event_type: "auction_closed", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  auction_settled: async (auctionId, data, ledgerSeq, txHash) => {
+    await updateAuctionOnSettle(
+      auctionId,
+      data.seller_proceeds ? String(data.seller_proceeds) : undefined,
+      data.royalty_amount ? String(data.royalty_amount) : undefined,
+      data.platform_fee_amount ? String(data.platform_fee_amount) : undefined
+    );
+    await insertEvent({ event_type: "auction_settled", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  auction_cancelled: async (auctionId, data, ledgerSeq, txHash) => {
+    await updateAuctionOnCancel(auctionId);
+    await insertEvent({ event_type: "auction_cancelled", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  attestation_recorded: async (auctionId, data, ledgerSeq, txHash) => {
+    const attestationHash = (data.attestation_hash as string) || "";
+    await updateAuctionOnAttestation(auctionId, attestationHash);
+    await insertEvent({ event_type: "attestation_recorded", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  auc_ext: async (auctionId, data, ledgerSeq, txHash) => {
+    await insertEvent({ event_type: "auction_extended", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
+  bid_out: async (auctionId, data, ledgerSeq, txHash) => {
+    const bidder = (data.bidder as string) || "";
+    await markBidRefunded(auctionId, bidder);
+    await insertEvent({ event_type: "bid_outbid", auction_id: auctionId, data, ledger_sequence: ledgerSeq, tx_hash: txHash });
+  },
 };
 
 async function fetchEventBatch(rpc: SorobanRpc.Server, startLedger: number): Promise<any> {
