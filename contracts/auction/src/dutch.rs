@@ -2,12 +2,16 @@
 //!
 //! The price starts high and drops linearly over time.
 //! The first bidder to "buy" at the current price wins instantly.
+//! Supports max_price slippage protection to guard against ledger latency.
 
 use soroban_sdk::{Address, Env};
 
 use crate::escrow;
 use crate::events;
-use crate::types::{Auction, AuctionFormat, AuctionStatus, BidRecord, StorageKey};
+use crate::types::{
+    Auction, AuctionFormat, AuctionStatus, BidRecord, StorageKey, PERSISTENT_BUMP_THRESHOLD,
+    PERSISTENT_LIFETIME,
+};
 
 /// Calculate the current price for a Dutch auction based on elapsed time.
 pub fn get_current_price(env: &Env, auction: &Auction) -> i128 {
@@ -39,15 +43,16 @@ pub fn get_current_price(env: &Env, auction: &Auction) -> i128 {
 /// # Requirements
 /// - Auction must be Active.
 /// - Auction must not have ended.
-/// - Buyer pays the current computed price.
+/// - Buyer pays the current computed price (guarded by optional max_price slippage limit).
 /// - Auction closes immediately upon successful buy.
-pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address) {
+pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address, max_price: Option<i128>) {
     buyer.require_auth();
 
+    let auction_key = StorageKey::Auction(auction_id);
     let mut auction: Auction = env
         .storage()
-        .instance()
-        .get(&StorageKey::Auction(auction_id))
+        .persistent()
+        .get(&auction_key)
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
     // ── Validation ──────────────────────────────────────────────────────────
@@ -67,7 +72,12 @@ pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address) {
 
     let price = get_current_price(env, &auction);
 
-    // ── Lock buyer funds ────────────────────────────────────────────────────
+    // Slippage protection: guarantee buyer doesn't pay more than expected
+    if let Some(limit) = max_price {
+        assert!(price <= limit, "Current price exceeds max acceptable price");
+    }
+
+    // ── Lock buyer funds into escrow ────────────────────────────────────────
     escrow::lock_bid(env, &auction.payment_token, buyer, price);
 
     // ── Record as winning bid ───────────────────────────────────────────────
@@ -76,9 +86,12 @@ pub fn buy_now(env: &Env, auction_id: u64, buyer: &Address) {
     auction.current_dutch_price = price;
     auction.status = AuctionStatus::Ended;
 
-    env.storage()
-        .instance()
-        .set(&StorageKey::Auction(auction_id), &auction);
+    env.storage().persistent().set(&auction_key, &auction);
+    env.storage().persistent().extend_ttl(
+        &auction_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     // ── Emit events ─────────────────────────────────────────────────────────
     events::emit_bid_placed(
