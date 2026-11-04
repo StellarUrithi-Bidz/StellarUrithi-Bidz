@@ -1,11 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useWallet } from "@/providers/wallet";
 import { PlusCircle, Gavel, TrendingDown, Shield, Loader2, CheckCircle } from "lucide-react";
 import toast from "react-hot-toast";
 import IPFSUploader from "@/components/ui/IPFSUploader";
 import { PinataUploadResult } from "@/lib/pinata";
+import { invokeContract } from "@/lib/stellar";
+import { Address, nativeToScVal } from "@stellar/stellar-sdk";
 
 const auctionFormats = [
   {
@@ -32,6 +35,7 @@ const auctionFormats = [
 ];
 
 export default function CreateAuctionPage() {
+  const router = useRouter();
   const { address, isConnected, connectWallet } = useWallet();
 
   const [step, setStep] = useState(1);
@@ -89,15 +93,52 @@ export default function CreateAuctionPage() {
 
     setSubmitting(true);
     try {
-      // In production, this would invoke the auction contract via Freighter
-      // await invokeContract("create_auction", [
-      //   addressToScVal(address),
-      //   addressToScVal(originalCreator || address),
-      //   ...format-specific args,
-      //   stringToScVal(metadataUri),
-      //   ...
-      // ], address);
-      toast.success("Auction created successfully! Redirecting...");
+      const now = Math.floor(Date.now() / 1000);
+      const startTime = now + 60;
+      const durationSecs = parseInt(duration || "24", 10) * 3600;
+      const endTime = startTime + durationSecs;
+      const paymentToken = process.env.NEXT_PUBLIC_PAYMENT_TOKEN || address;
+
+      let formatVal: any;
+      if (format === "english") {
+        formatVal = { English: [] };
+      } else if (format === "dutch") {
+        formatVal = { Dutch: [] };
+      } else {
+        formatVal = { SealedBid: [] };
+      }
+
+      const commitDeadline = format === "sealed_bid" ? startTime + parseInt(commitDuration || "12", 10) * 3600 : 0;
+      const revealDeadline = format === "sealed_bid" ? commitDeadline + 12 * 3600 : 0;
+
+      const itemVal = itemType === "digital"
+        ? { Digital: { nft_contract: new Address(paymentToken), token_id: 1n } }
+        : { Physical: { custodian: new Address(custodianAddress || address), attestation_hash: null } };
+
+      const paramsScVal = nativeToScVal({
+        seller: new Address(address),
+        original_creator: new Address(originalCreator || address),
+        format: formatVal,
+        item: itemVal,
+        payment_token: new Address(paymentToken),
+        reserve_price: BigInt(reservePrice || "0"),
+        royalty_bps: parseInt(royaltyBps || "500", 10),
+        start_time: BigInt(startTime),
+        end_time: BigInt(endTime),
+        metadata_uri: metadataUri,
+        min_increment: BigInt(minIncrement || "0"),
+        start_price: BigInt(startPrice || "0"),
+        price_decay_per_second: BigInt(decayRate || "0"),
+        commit_deadline: BigInt(commitDeadline),
+        reveal_deadline: BigInt(revealDeadline),
+        max_bidders: 50,
+      });
+
+      const { txHash } = await invokeContract("create_auction", [paramsScVal], address);
+      toast.success(`Auction created on-chain! Tx: ${txHash.slice(0, 10)}...`);
+      setTimeout(() => {
+        router.push("/");
+      }, 2000);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to create auction";
       toast.error(message);
