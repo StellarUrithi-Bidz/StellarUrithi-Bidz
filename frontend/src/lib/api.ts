@@ -47,7 +47,7 @@ export interface AuctionItem {
   seller: string;
   original_creator: string;
   format: "english" | "dutch" | "sealed_bid";
-  status: "created" | "active" | "ended" | "settled" | "cancelled";
+  status: "created" | "active" | "ended" | "closed" | "settled" | "cancelled";
   item_type: "digital" | "physical";
   nft_contract?: string;
   token_id?: number;

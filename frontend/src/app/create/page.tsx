@@ -112,7 +112,7 @@ export default function CreateAuctionPage() {
       const revealDeadline = format === "sealed_bid" ? commitDeadline + 12 * 3600 : 0;
 
       const itemVal = itemType === "digital"
-        ? { Digital: { nft_contract: new Address(paymentToken), token_id: 1n } }
+        ? { Digital: { nft_contract: new Address(paymentToken), token_id: BigInt(1) } }
         : { Physical: { custodian: new Address(custodianAddress || address), attestation_hash: null } };
 
       const paramsScVal = nativeToScVal({

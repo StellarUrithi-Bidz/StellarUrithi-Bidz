@@ -32,9 +32,14 @@ export async function computeCommitment(
   saltBytes: Uint8Array
 ): Promise<Uint8Array> {
   const enc = new TextEncoder();
+  const keyBuffer = saltBytes.buffer.slice(
+    saltBytes.byteOffset,
+    saltBytes.byteOffset + saltBytes.byteLength
+  ) as ArrayBuffer;
+
   const cryptoKey = await window.crypto.subtle.importKey(
     "raw",
-    saltBytes,
+    keyBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
@@ -51,7 +56,7 @@ export async function computeCommitment(
   new Uint8Array(msgBuffer, 8, 56).set(addrBytes.subarray(0, 56));
 
   // 3. amount as i128 (high 64 bits = 0, low 64 bits = BigInt(amount))
-  view.setBigUint64(64, 0n, false);
+  view.setBigUint64(64, BigInt(0), false);
   view.setBigUint64(72, BigInt(amount), false);
 
   const sigBuffer = await window.crypto.subtle.sign("HMAC", cryptoKey, msgBuffer);
