@@ -1,8 +1,10 @@
 //! Sealed-bid (commit-reveal) auction implementation.
 //!
 //! Two-phase auction:
-//! 1. **Commit phase**: Bidders submit an HMAC-SHA256 commitment.
+//! 1. **Commit phase**: Bidders submit an HMAC-SHA256 commitment and escrow collateral.
 //! 2. **Reveal phase**: Bidders reveal their bid and salt.
+//!
+//! Losing bidders are credited with pull-payment refunds (preventing unbounded loops and DoS).
 
 use soroban_sdk::{Address, Bytes, BytesN, Env};
 
@@ -10,6 +12,7 @@ use crate::escrow;
 use crate::events;
 use crate::types::{
     Auction, AuctionFormat, AuctionStatus, BidCommitment, SealedBidEntry, StorageKey,
+    PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME,
 };
 
 // ── HMAC-SHA256 (RFC 2104) ──────────────────────────────────────────────────────
@@ -47,7 +50,6 @@ pub(crate) fn hmac_sha256(env: &Env, key: &BytesN<32>, message: &Bytes) -> Bytes
 }
 
 /// Build the HMAC message: bid_amount || auction_id || bidder_address.
-/// Public for test access — tests need to compute matching commitments.
 pub(crate) fn build_commitment_message(
     env: &Env,
     bid_amount: i128,
@@ -68,7 +70,7 @@ pub(crate) fn build_commitment_message(
         msg.push_back(b);
     }
 
-    // bidder address — serialize String bytes via copy_into_slice
+    // bidder address — serialize String bytes
     let addr_str = bidder.to_string();
     let str_len = addr_str.len() as usize;
     let mut buf = [0u8; 64];
@@ -89,10 +91,11 @@ pub fn commit_bid(
 ) {
     bidder.require_auth();
 
+    let auction_key = StorageKey::Auction(auction_id);
     let mut auction: Auction = env
         .storage()
-        .instance()
-        .get(&StorageKey::Auction(auction_id))
+        .persistent()
+        .get(&auction_key)
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
     assert!(
@@ -122,7 +125,7 @@ pub fn commit_bid(
     let key = StorageKey::Commitment(auction_id, bidder.clone());
     assert!(
         env.storage()
-            .instance()
+            .persistent()
             .get::<_, BidCommitment>(&key)
             .is_none(),
         "Bidder has already committed to this auction"
@@ -136,12 +139,20 @@ pub fn commit_bid(
         amount: bid_amount,
         timestamp: now,
     };
-    env.storage().instance().set(&key, &commitment_record);
+    env.storage().persistent().set(&key, &commitment_record);
+    env.storage().persistent().extend_ttl(
+        &key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     auction.bidder_count += 1;
-    env.storage()
-        .instance()
-        .set(&StorageKey::Auction(auction_id), &auction);
+    env.storage().persistent().set(&auction_key, &auction);
+    env.storage().persistent().extend_ttl(
+        &auction_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     events::emit_commitment_stored(env, auction_id, bidder);
 }
@@ -155,10 +166,11 @@ pub fn reveal_bid(
 ) {
     bidder.require_auth();
 
+    let auction_key = StorageKey::Auction(auction_id);
     let mut auction: Auction = env
         .storage()
-        .instance()
-        .get(&StorageKey::Auction(auction_id))
+        .persistent()
+        .get(&auction_key)
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
     assert!(
@@ -173,7 +185,7 @@ pub fn reveal_bid(
     let key = StorageKey::Commitment(auction_id, bidder.clone());
     let stored: BidCommitment = env
         .storage()
-        .instance()
+        .persistent()
         .get(&key)
         .unwrap_or_else(|| panic!("No commitment found for bidder"));
 
@@ -188,7 +200,7 @@ pub fn reveal_bid(
     let reveal_key = StorageKey::RevealedBid(auction_id, bidder.clone());
     assert!(
         env.storage()
-            .instance()
+            .persistent()
             .get::<_, SealedBidEntry>(&reveal_key)
             .is_none(),
         "Bid already revealed"
@@ -201,19 +213,31 @@ pub fn reveal_bid(
     };
 
     auction.revealed_bids.push_back(entry.clone());
-    env.storage()
-        .instance()
-        .set(&StorageKey::Auction(auction_id), &auction);
-    env.storage().instance().set(&reveal_key, &entry);
+    env.storage().persistent().set(&auction_key, &auction);
+    env.storage().persistent().extend_ttl(
+        &auction_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
+
+    env.storage().persistent().set(&reveal_key, &entry);
+    env.storage().persistent().extend_ttl(
+        &reveal_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     events::emit_bid_revealed(env, auction_id, bidder, bid_amount);
 }
 
 pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
+    bidder.require_auth();
+
+    let auction_key = StorageKey::Auction(auction_id);
     let mut auction: Auction = env
         .storage()
-        .instance()
-        .get(&StorageKey::Auction(auction_id))
+        .persistent()
+        .get(&auction_key)
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
     assert!(
@@ -227,38 +251,42 @@ pub fn refund_unrevealed(env: &Env, auction_id: u64, bidder: &Address) {
     let commit_key = StorageKey::Commitment(auction_id, bidder.clone());
     let stored: BidCommitment = env
         .storage()
-        .instance()
+        .persistent()
         .get(&commit_key)
         .unwrap_or_else(|| panic!("No commitment found for bidder"));
 
     let reveal_key = StorageKey::RevealedBid(auction_id, bidder.clone());
     assert!(
         env.storage()
-            .instance()
+            .persistent()
             .get::<_, SealedBidEntry>(&reveal_key)
             .is_none(),
-        "Bid already revealed — use finalize instead"
+        "Bid already revealed — withdraw refund instead if outbid"
     );
 
     let refund_amount = stored.amount;
-    env.storage().instance().remove(&commit_key);
+    env.storage().persistent().remove(&commit_key);
     escrow::refund_bid(env, &auction.payment_token, bidder, refund_amount);
 
     if auction.bidder_count > 0 {
         auction.bidder_count -= 1;
     }
-    env.storage()
-        .instance()
-        .set(&StorageKey::Auction(auction_id), &auction);
+    env.storage().persistent().set(&auction_key, &auction);
+    env.storage().persistent().extend_ttl(
+        &auction_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     events::emit_unrevealed_refunded(env, auction_id, bidder, refund_amount);
 }
 
 pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
+    let auction_key = StorageKey::Auction(auction_id);
     let mut auction: Auction = env
         .storage()
-        .instance()
-        .get(&StorageKey::Auction(auction_id))
+        .persistent()
+        .get(&auction_key)
         .unwrap_or_else(|| panic!("Auction not found: {}", auction_id));
 
     assert!(
@@ -287,10 +315,20 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
 
     let winner = highest_entry.unwrap_or_else(|| panic!("No valid bids revealed"));
 
+    // Credit losing revealed bidders with claimable refund balance (pull pattern).
+    // Prevents unbounded loop transaction failure / push DoS.
     for entry in auction.revealed_bids.iter() {
         if entry.bidder != winner.bidder {
-            escrow::refund_bid(env, &auction.payment_token, &entry.bidder, entry.amount);
-            events::emit_bid_refunded(env, auction_id, &entry.bidder, entry.amount);
+            let refund_key = StorageKey::Refund(auction_id, entry.bidder.clone());
+            let existing: i128 = env.storage().persistent().get(&refund_key).unwrap_or(0);
+            let updated = existing.saturating_add(entry.amount);
+            env.storage().persistent().set(&refund_key, &updated);
+            env.storage().persistent().extend_ttl(
+                &refund_key,
+                PERSISTENT_BUMP_THRESHOLD,
+                PERSISTENT_LIFETIME,
+            );
+            events::emit_bid_outbid(env, auction_id, &entry.bidder, entry.amount);
         }
     }
 
@@ -298,9 +336,12 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
     auction.highest_bid = winner.amount;
     auction.status = AuctionStatus::Ended;
 
-    env.storage()
-        .instance()
-        .set(&StorageKey::Auction(auction_id), &auction);
+    env.storage().persistent().set(&auction_key, &auction);
+    env.storage().persistent().extend_ttl(
+        &auction_key,
+        PERSISTENT_BUMP_THRESHOLD,
+        PERSISTENT_LIFETIME,
+    );
 
     events::emit_auction_closed(
         env,
@@ -310,10 +351,3 @@ pub fn finalize_sealed_auction(env: &Env, auction_id: u64) {
         &AuctionFormat::SealedBid,
     );
 }
-
-// ── HMAC-SHA256 Audit Notes ──────────────────────────────────────────────────
-// RFC 2104 compliant: ipad 0x36 / opad 0x5c ✓
-// Domain separation: bid_amount || auction_id || bidder ✓
-// Cross-auction replay prevention via auction_id in message ✓
-// Verified against OpenSSL HMAC-SHA256 test vectors ✓
-// Recommendation: external audit before mainnet deployment
