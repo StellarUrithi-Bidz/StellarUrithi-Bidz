@@ -1,13 +1,20 @@
 "use client";
 
-import { useState, useEffect, useCallback, use } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useWallet } from "@/providers/wallet";
 import { useAuctionSocket } from "@/hooks/useWebSocket";
 import { getAuction, getBidsForAuction, AuctionItem, BidItem } from "@/lib/api";
-import { formatStroops, formatAddress, formatTimeRemaining, bpsToPercentage, getContractId } from "@/lib/stellar";
-import { invokeContract, addressToScVal, i128ToScVal, u64ToScVal, stringToScVal } from "@/lib/stellar";
-import { ArrowLeft, Clock, User, Tag, Gavel, TrendingDown, Shield, Loader2, CheckCircle, XCircle } from "lucide-react";
+import {
+  formatStroops, formatAddress, formatTimeRemaining, bpsToPercentage, getContractId,
+  invokeContract, addressToScVal, i128ToScVal, u64ToScVal, bytesNToScVal,
+} from "@/lib/stellar";
+import { generateSalt, hexToBytes, computeCommitment } from "@/lib/crypto";
+import { nativeToScVal } from "@stellar/stellar-sdk";
+import {
+  ArrowLeft, Clock, User, Tag, Gavel, TrendingDown, Shield,
+  Loader2, CheckCircle, XCircle, RefreshCw, KeyRound, AlertCircle,
+} from "lucide-react";
 import Link from "next/link";
 import toast from "react-hot-toast";
 
@@ -21,11 +28,32 @@ export default function AuctionDetailPage() {
   const [loading, setLoading] = useState(true);
   const [bidAmount, setBidAmount] = useState("");
   const [placingBid, setPlacingBid] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState("");
+
+  // Sealed-bid local storage state
+  const [savedCommitment, setSavedCommitment] = useState<{ amount: string; saltHex: string } | null>(null);
 
   // WebSocket for real-time updates
   const { isConnected: wsConnected, latestBid, auctionClosed, auctionSettled } =
     useAuctionSocket(auctionId);
+
+  // Load saved sealed-bid commitment if exists
+  useEffect(() => {
+    if (address && auctionId) {
+      try {
+        const key = `sealed_${auctionId}_${address}`;
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          setSavedCommitment(JSON.parse(raw));
+        } else {
+          setSavedCommitment(null);
+        }
+      } catch {
+        setSavedCommitment(null);
+      }
+    }
+  }, [address, auctionId]);
 
   // Fetch auction data
   const fetchAuction = useCallback(async () => {
@@ -79,7 +107,7 @@ export default function AuctionDetailPage() {
   // Apply auction closed
   useEffect(() => {
     if (auctionClosed && auction && auctionClosed.auctionId === auctionId) {
-      setAuction((prev) => (prev ? { ...prev, status: "ended" } : prev));
+      setAuction((prev) => (prev ? { ...prev, status: "closed" } : prev));
     }
   }, [auctionClosed, auctionId, auction]);
 
@@ -99,8 +127,8 @@ export default function AuctionDetailPage() {
     return () => clearInterval(interval);
   }, [auction]);
 
-  // Place bid
-  const handlePlaceBid = async () => {
+  // ── English Bidding ─────────────────────────────────────────────────────────────
+  const handlePlaceEnglishBid = async () => {
     if (!isConnected || !address) {
       toast.error("Connect your wallet first");
       connectWallet();
@@ -113,18 +141,14 @@ export default function AuctionDetailPage() {
 
     setPlacingBid(true);
     try {
-      // For Freighter integration, we'd build the transaction and send it
-      // This is the Soroban contract invocation using the wallet
       const amountBigInt = BigInt(bidAmount);
+      const { txHash } = await invokeContract("place_bid", [
+        u64ToScVal(BigInt(auctionId)),
+        addressToScVal(address),
+        i128ToScVal(amountBigInt),
+      ], address);
 
-      // In production, this would be signed by Freighter and submitted
-      // await invokeContract("place_bid", [
-      //   u64ToScVal(BigInt(auctionId)),
-      //   addressToScVal(address),
-      //   i128ToScVal(amountBigInt),
-      // ], address);
-
-      toast.success("Bid placed successfully!");
+      toast.success(`Bid placed on-chain! Tx: ${txHash.slice(0, 10)}...`);
       setBidAmount("");
       fetchAuction();
     } catch (err: unknown) {
@@ -132,6 +156,197 @@ export default function AuctionDetailPage() {
       toast.error(message);
     } finally {
       setPlacingBid(false);
+    }
+  };
+
+  // ── Dutch Buy Now ───────────────────────────────────────────────────────────────
+  const handleBuyNow = async () => {
+    if (!isConnected || !address) {
+      toast.error("Connect your wallet first");
+      connectWallet();
+      return;
+    }
+
+    setPlacingBid(true);
+    try {
+      const { txHash } = await invokeContract("buy_now", [
+        u64ToScVal(BigInt(auctionId)),
+        addressToScVal(address),
+        nativeToScVal(null, { type: "option" }),
+      ], address);
+
+      toast.success(`Item purchased! Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to purchase";
+      toast.error(message);
+    } finally {
+      setPlacingBid(false);
+    }
+  };
+
+  // ── Sealed-Bid Commit ───────────────────────────────────────────────────────────
+  const handleCommitSealedBid = async () => {
+    if (!isConnected || !address) {
+      toast.error("Connect your wallet first");
+      connectWallet();
+      return;
+    }
+    if (!bidAmount) {
+      toast.error("Enter a bid amount");
+      return;
+    }
+
+    setPlacingBid(true);
+    try {
+      const { bytes: saltBytes, hex: saltHex } = generateSalt();
+      const commitment = await computeCommitment(auctionId, address, bidAmount, saltBytes);
+
+      // Save salt and amount to localStorage
+      const storageKey = `sealed_${auctionId}_${address}`;
+      const payload = { amount: bidAmount, saltHex };
+      localStorage.setItem(storageKey, JSON.stringify(payload));
+      setSavedCommitment(payload);
+
+      const depositAmount = BigInt(bidAmount);
+      const { txHash } = await invokeContract("commit_bid", [
+        u64ToScVal(BigInt(auctionId)),
+        addressToScVal(address),
+        bytesNToScVal(commitment),
+        i128ToScVal(depositAmount),
+      ], address);
+
+      toast.success(`Sealed bid committed! Salt saved locally. Tx: ${txHash.slice(0, 10)}...`);
+      setBidAmount("");
+      fetchAuction();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to commit bid";
+      toast.error(message);
+    } finally {
+      setPlacingBid(false);
+    }
+  };
+
+  // ── Sealed-Bid Reveal ───────────────────────────────────────────────────────────
+  const handleRevealSealedBid = async () => {
+    if (!isConnected || !address) {
+      toast.error("Connect your wallet first");
+      connectWallet();
+      return;
+    }
+    if (!savedCommitment) {
+      toast.error("No saved bid commitment found for this account");
+      return;
+    }
+
+    setPlacingBid(true);
+    try {
+      const saltBytes = hexToBytes(savedCommitment.saltHex);
+
+      const { txHash } = await invokeContract("reveal_bid", [
+        u64ToScVal(BigInt(auctionId)),
+        addressToScVal(address),
+        i128ToScVal(BigInt(savedCommitment.amount)),
+        bytesNToScVal(saltBytes),
+      ], address);
+
+      toast.success(`Sealed bid revealed! Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to reveal bid";
+      toast.error(message);
+    } finally {
+      setPlacingBid(false);
+    }
+  };
+
+  // ── Pull-Refund Withdrawal ───────────────────────────────────────────────────────
+  const handleWithdrawRefund = async () => {
+    if (!isConnected || !address) {
+      toast.error("Connect your wallet first");
+      connectWallet();
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const { txHash } = await invokeContract("withdraw_refund", [
+        u64ToScVal(BigInt(auctionId)),
+        addressToScVal(address),
+      ], address);
+
+      toast.success(`Refund withdrawn! Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to withdraw refund";
+      toast.error(message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // ── Seller / Admin Actions ───────────────────────────────────────────────────────
+  const handleApproveNftTransfer = async () => {
+    if (!isConnected || !address) return;
+    setActionLoading(true);
+    try {
+      const { txHash } = await invokeContract("approve_nft_transfer", [
+        u64ToScVal(BigInt(auctionId)),
+      ], address);
+      toast.success(`NFT transfer approved! Tx: ${txHash.slice(0, 10)}...`);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Approval failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCloseAuction = async () => {
+    if (!isConnected || !address) return;
+    setActionLoading(true);
+    try {
+      const { txHash } = await invokeContract("close_auction", [
+        u64ToScVal(BigInt(auctionId)),
+      ], address);
+      toast.success(`Auction closed! Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Close failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSettleAuction = async () => {
+    if (!isConnected || !address) return;
+    setActionLoading(true);
+    try {
+      const { txHash } = await invokeContract("settle_auction", [
+        u64ToScVal(BigInt(auctionId)),
+      ], address);
+      toast.success(`Auction settled & funds distributed! Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Settlement failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelAuction = async () => {
+    if (!isConnected || !address) return;
+    if (!confirm("Are you sure you want to cancel this auction?")) return;
+    setActionLoading(true);
+    try {
+      const { txHash } = await invokeContract("cancel_auction", [
+        u64ToScVal(BigInt(auctionId)),
+      ], address);
+      toast.success(`Auction cancelled. Tx: ${txHash.slice(0, 10)}...`);
+      fetchAuction();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Cancel failed");
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -153,6 +368,9 @@ export default function AuctionDetailPage() {
       </div>
     );
   }
+
+  const isSeller = address && auction.seller.toLowerCase() === address.toLowerCase();
+  const isWinner = address && auction.highest_bidder?.toLowerCase() === address.toLowerCase();
 
   const formatLabel = {
     english: { label: "English", icon: Gavel, color: "text-ochre-400" },
@@ -186,9 +404,11 @@ export default function AuctionDetailPage() {
                     className={`px-3 py-1 rounded-lg text-xs font-semibold border ${
                       auction.status === "active"
                         ? "bg-green-500/20 text-green-400 border-green-500/30"
-                        : auction.status === "ended"
+                        : auction.status === "closed" || auction.status === "ended"
                         ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
-                        : "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                        : auction.status === "settled"
+                        ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                        : "bg-red-500/20 text-red-400 border-red-500/30"
                     }`}
                   >
                     {auction.status.charAt(0).toUpperCase() + auction.status.slice(1)}
@@ -208,7 +428,9 @@ export default function AuctionDetailPage() {
             {/* Price & Timer */}
             <div className="grid grid-cols-2 gap-4 p-4 rounded-xl bg-white/[0.03] border border-white/5">
               <div>
-                <p className="text-xs text-white/40 mb-1">Current Bid</p>
+                <p className="text-xs text-white/40 mb-1">
+                  {auction.format === "dutch" ? "Current Dutch Price" : "Leading Bid"}
+                </p>
                 <p className="text-2xl font-bold text-white">
                   {auction.highest_bid && auction.highest_bid !== "0"
                     ? `${formatStroops(auction.highest_bid)} stroops`
@@ -256,20 +478,6 @@ export default function AuctionDetailPage() {
                   {formatAddress(getContractId(), 6)}
                 </span>
               </div>
-              {auction.format === "english" && auction.min_increment && (
-                <div>
-                  <span className="text-white/40">Min Increment:</span>
-                  <span className="ml-2 text-white">{formatStroops(auction.min_increment || "0")} stroops</span>
-                </div>
-              )}
-              {auction.format === "dutch" && auction.current_dutch_price && (
-                <div>
-                  <span className="text-white/40">Current Price:</span>
-                  <span className="ml-2 text-indigo-400">
-                    {formatStroops(auction.current_dutch_price || "0")} stroops
-                  </span>
-                </div>
-              )}
             </div>
 
             {/* Metadata */}
@@ -311,7 +519,7 @@ export default function AuctionDetailPage() {
           <div className="glass-card p-6">
             <h3 className="text-lg font-semibold text-white mb-4">Bid History</h3>
             {bids.length === 0 ? (
-              <p className="text-sm text-white/30 text-center py-6">No bids yet</p>
+              <p className="text-sm text-white/30 text-center py-6">No bids recorded</p>
             ) : (
               <div className="space-y-2">
                 {bids.map((bid, i) => (
@@ -356,50 +564,36 @@ export default function AuctionDetailPage() {
           </div>
         </div>
 
-        {/* Sidebar — Bidding Panel */}
+        {/* Sidebar — Actions Panel */}
         <div className="space-y-4">
           <div className="glass-card p-6 sticky top-24">
             <h3 className="text-lg font-semibold text-white mb-4">
-              {auction.status === "active" ? "Place a Bid" : "Auction " + auction.status}
+              {auction.status === "active" ? "Participation Panel" : "Auction " + auction.status}
             </h3>
 
-            {auction.status === "active" ? (
+            {auction.status === "active" && (
               <>
-                {/* Current price info */}
-                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 mb-4">
-                  <p className="text-xs text-white/40 mb-1">
-                    {auction.format === "english"
-                      ? "Minimum Next Bid"
-                      : auction.format === "dutch"
-                      ? "Current Price"
-                      : "Your Bid Amount"}
-                  </p>
-                  <p className="text-xl font-bold text-ochre-400">
-                    {auction.format === "english"
-                      ? auction.highest_bid && auction.highest_bid !== "0"
-                        ? formatStroops(
-                            String(
-                              BigInt(auction.highest_bid) +
-                                BigInt(auction.min_increment || "10")
-                            )
-                          )
-                        : formatStroops(auction.reserve_price)
-                      : auction.format === "dutch" && auction.current_dutch_price
-                      ? formatStroops(auction.current_dutch_price)
-                      : formatStroops(auction.reserve_price)}{" "}
-                    stroops
-                  </p>
-                </div>
-
-                {/* Bid input */}
-                {auction.format !== "dutch" && (
+                {/* English Auction Flow */}
+                {auction.format === "english" && (
                   <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 mb-2">
+                      <p className="text-xs text-white/40 mb-1">Minimum Next Bid</p>
+                      <p className="text-xl font-bold text-ochre-400">
+                        {auction.highest_bid && auction.highest_bid !== "0"
+                          ? formatStroops(
+                              String(BigInt(auction.highest_bid) + BigInt(auction.min_increment || "10"))
+                            )
+                          : formatStroops(auction.reserve_price)}{" "}
+                        stroops
+                      </p>
+                    </div>
+
                     <div className="relative">
                       <input
                         type="number"
                         value={bidAmount}
                         onChange={(e) => setBidAmount(e.target.value)}
-                        placeholder="Enter bid amount in stroops"
+                        placeholder="Enter bid amount"
                         className="input-field pr-20"
                       />
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/30">
@@ -408,21 +602,14 @@ export default function AuctionDetailPage() {
                     </div>
 
                     <button
-                      onClick={handlePlaceBid}
+                      onClick={handlePlaceEnglishBid}
                       disabled={placingBid || !isConnected}
                       className="btn-primary w-full flex items-center justify-center gap-2"
                     >
                       {placingBid ? (
                         <>
                           <Loader2 className="w-4 h-4 animate-spin" />
-                          Placing Bid...
-                        </>
-                      ) : !isConnected ? (
-                        "Connect Wallet to Bid"
-                      ) : auction.format === "sealed_bid" ? (
-                        <>
-                          <Shield className="w-4 h-4" />
-                          Commit Sealed Bid
+                          Submitting Bid...
                         </>
                       ) : (
                         <>
@@ -434,71 +621,167 @@ export default function AuctionDetailPage() {
                   </div>
                 )}
 
-                {/* Dutch buy now */}
+                {/* Dutch Auction Flow */}
                 {auction.format === "dutch" && (
-                  <button
-                    onClick={handlePlaceBid}
-                    disabled={placingBid || !isConnected}
-                    className="btn-primary w-full flex items-center justify-center gap-2"
-                  >
-                    {placingBid ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <TrendingDown className="w-4 h-4" />
-                        Buy Now
-                      </>
-                    )}
-                  </button>
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5 mb-2">
+                      <p className="text-xs text-white/40 mb-1">Current Price</p>
+                      <p className="text-2xl font-bold text-indigo-400">
+                        {formatStroops(auction.current_dutch_price || auction.reserve_price)} stroops
+                      </p>
+                    </div>
+
+                    <button
+                      onClick={handleBuyNow}
+                      disabled={placingBid || !isConnected}
+                      className="btn-primary w-full flex items-center justify-center gap-2"
+                    >
+                      {placingBid ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Executing Purchase...
+                        </>
+                      ) : (
+                        <>
+                          <TrendingDown className="w-4 h-4" />
+                          Buy Now at Current Price
+                        </>
+                      )}
+                    </button>
+                  </div>
                 )}
 
-                {/* WebSocket status */}
-                <p className="text-xs text-white/20 mt-3 text-center">
-                  {wsConnected ? "● Live updates active" : "○ Connecting..."}
-                </p>
+                {/* Sealed-Bid Auction Flow */}
+                {auction.format === "sealed_bid" && (
+                  <div className="space-y-4">
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
+                      <p className="text-xs text-white/40 mb-1">Commit-Reveal Mode</p>
+                      <p className="text-xs text-terracotta-400">
+                        Bids are hashed with a local salt during commit and revealed after deadline.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="relative">
+                        <input
+                          type="number"
+                          value={bidAmount}
+                          onChange={(e) => setBidAmount(e.target.value)}
+                          placeholder="Secret bid amount in stroops"
+                          className="input-field pr-20"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-white/30">
+                          stroops
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={handleCommitSealedBid}
+                        disabled={placingBid || !isConnected}
+                        className="btn-primary w-full flex items-center justify-center gap-2"
+                      >
+                        {placingBid ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Committing Hash...
+                          </>
+                        ) : (
+                          <>
+                            <Shield className="w-4 h-4" />
+                            Commit Sealed Bid
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {savedCommitment && (
+                      <div className="p-3 rounded-xl bg-terracotta-500/10 border border-terracotta-500/20 space-y-2">
+                        <p className="text-xs text-terracotta-300 font-semibold flex items-center gap-1">
+                          <KeyRound className="w-3.5 h-3.5" /> Saved Commitment
+                        </p>
+                        <p className="text-xs text-white/60">
+                          Amount: {formatStroops(savedCommitment.amount)} stroops
+                        </p>
+                        <button
+                          onClick={handleRevealSealedBid}
+                          disabled={placingBid || !isConnected}
+                          className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1"
+                        >
+                          {placingBid ? <Loader2 className="w-3 h-3 animate-spin" /> : "Reveal Sealed Bid"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
-            ) : auction.status === "ended" ? (
-              <div className="text-center py-6">
-                <Gavel className="w-12 h-12 text-yellow-400/30 mx-auto mb-3" />
-                <p className="text-white/60 text-sm">
-                  Auction ended.
-                  {auction.highest_bidder && (
-                    <>Winner: {formatAddress(auction.highest_bidder, 4)}</>
-                  )}
-                </p>
-              </div>
-            ) : auction.status === "settled" ? (
-              <div className="text-center py-6">
-                <CheckCircle className="w-12 h-12 text-green-400/30 mx-auto mb-3" />
-                <p className="text-white/60 text-sm">Auction settled</p>
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <XCircle className="w-12 h-12 text-red-400/30 mx-auto mb-3" />
-                <p className="text-white/60 text-sm">Auction {auction.status}</p>
+            )}
+
+            {/* Outbid / Claimable Refund Section */}
+            <div className="mt-4 pt-4 border-t border-white/5 space-y-2">
+              <p className="text-xs text-white/40">Escrow Refunds (Pull Payment)</p>
+              <button
+                onClick={handleWithdrawRefund}
+                disabled={actionLoading || !isConnected}
+                className="btn-secondary w-full text-xs py-2.5 flex items-center justify-center gap-1.5"
+              >
+                {actionLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Withdraw Available Refund
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Seller & Winner Settlement Controls */}
+            {(isSeller || isWinner) && (
+              <div className="mt-4 pt-4 border-t border-white/5 space-y-2">
+                <p className="text-xs text-ochre-400 font-semibold">Management Controls</p>
+
+                {isSeller && auction.status === "active" && (
+                  <>
+                    <button
+                      onClick={handleApproveNftTransfer}
+                      disabled={actionLoading}
+                      className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5"
+                    >
+                      Approve NFT Transfer
+                    </button>
+                    <button
+                      onClick={handleCloseAuction}
+                      disabled={actionLoading}
+                      className="btn-secondary w-full text-xs py-2 flex items-center justify-center gap-1.5"
+                    >
+                      Close Auction
+                    </button>
+                    <button
+                      onClick={handleCancelAuction}
+                      disabled={actionLoading}
+                      className="w-full text-xs py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 transition-colors"
+                    >
+                      Cancel Listing
+                    </button>
+                  </>
+                )}
+
+                {(auction.status === "closed" || auction.status === "ended") && (
+                  <button
+                    onClick={handleSettleAuction}
+                    disabled={actionLoading}
+                    className="btn-primary w-full text-xs py-2.5 flex items-center justify-center gap-1.5"
+                  >
+                    {actionLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Settle Auction & Payouts"}
+                  </button>
+                )}
               </div>
             )}
 
-            {/* Settled breakdown */}
-            {auction.status === "settled" && auction.seller_proceeds && (
-              <div className="mt-4 space-y-2 text-sm border-t border-white/5 pt-4">
-                <div className="flex justify-between">
-                  <span className="text-white/40">Seller gets:</span>
-                  <span className="text-white">{formatStroops(auction.seller_proceeds || "0")}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/40">Creator gets:</span>
-                  <span className="text-ochre-400">{formatStroops(auction.royalty_amount || "0")}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/40">Platform gets:</span>
-                  <span className="text-white/30">{formatStroops(auction.platform_fee_amount || "0")}</span>
-                </div>
-              </div>
-            )}
+            {/* WebSocket status */}
+            <p className="text-xs text-white/20 mt-4 text-center">
+              {wsConnected ? "● Live updates active" : "○ Real-time connecting..."}
+            </p>
           </div>
         </div>
       </div>
