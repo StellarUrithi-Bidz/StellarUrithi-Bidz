@@ -1,147 +1,165 @@
-# 🚀 Deploying StellarUrithi-Bidz to Stellar Testnet
+# 🚀 Deploying StellarUrithi-Bidz
 
-## Quick Deploy (One Command)
+This document provides step-by-step instructions for deploying the StellarUrithi-Bidz protocol smart contracts, backend indexer, and web clients to the Stellar Testnet and Mainnet.
 
-```bash
-./deploy.sh
-```
+---
 
-This interactive wizard will:
-1. Check prerequisites (Rust, soroban CLI v22+, wasm32 target, jq)
-2. Generate/fund a testnet identity
-3. Build & test contracts
-4. Optimize WASM
-5. Deploy to testnet
-6. Initialize contract
-7. Verify deployment
-8. Save contract ID for frontend/backend
+## 1. Prerequisites
 
-## Prerequisites
+Ensure you have the required toolchains installed:
 
 ```bash
-# Install Rust
+# 1. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Add wasm target
+# 2. Add wasm32 compilation target
 rustup target add wasm32-unknown-unknown
 
-# Install soroban CLI (v22+)
-cargo install soroban-cli
+# 3. Install Stellar CLI (formerly soroban-cli v22+)
+cargo install --locked stellar-cli --features opt
 
-# Install jq
-sudo apt install jq  # Linux
-brew install jq      # macOS
+# 4. Install Node.js (v20 LTS recommended) and Docker
+node --version
+docker --version
 ```
 
-## Manual Deployment Steps
+---
 
-### 1. Build Contracts
+## 2. Smart Contract Deployment
+
+### Step 1: Run Unit Tests
 ```bash
 cd contracts
+cargo test
+# All 19 tests covering pull refunds, anti-sniping, slippage, and storage must pass.
+```
+
+### Step 2: Build & Optimize Release WASM
+```bash
 cargo build --target wasm32-unknown-unknown --release
-cargo test  # All 16 tests must pass
+
+# Optimize WASM size
+stellar contract optimize \
+  --wasm target/wasm32-unknown-unknown/release/stellar_urithi_auction.wasm
 ```
 
-### 2. Setup Identity
+### Step 3: Configure Deployment Identity
 ```bash
-soroban keys generate alice --network testnet --no-fund
-soroban keys fund alice --network testnet
+# Generate keypair (Testnet)
+stellar keys generate deployer --network testnet
+
+# Fund keypair via Friendbot
+stellar keys fund deployer --network testnet
 ```
 
-### 3. Deploy Contract
+### Step 4: Deploy WASM to Stellar
 ```bash
-soroban contract deploy \
-  --wasm contracts/target/wasm32-unknown-unknown/release/stellar_urithi_auction.wasm \
-  --source alice \
-  --network testnet \
-  --fee 100000
+stellar contract deploy \
+  --wasm target/wasm32-unknown-unknown/release/stellar_urithi_auction.optimized.wasm \
+  --source deployer \
+  --network testnet
+# Outputs: Contract Address (e.g., CB... or CD...)
 ```
 
-### 4. Initialize
+### Step 5: Initialize Platform Configuration
 ```bash
-CONTRACT_ID="<from-step-3>"
-ADMIN=$(soroban keys address alice)
+CONTRACT_ID="<DEPLOYED_CONTRACT_ID>"
+ADMIN_ADDRESS=$(stellar keys address deployer)
 
-soroban contract invoke \
+stellar contract invoke \
   --id "$CONTRACT_ID" \
-  --source alice \
+  --source deployer \
   --network testnet \
-  --fee 100000 \
   -- initialize \
-  --admin "$ADMIN" \
+  --admin "$ADMIN_ADDRESS" \
   --default_platform_fee_bps 250 \
   --max_royalty_bps 1500 \
-  --platform_wallet "$ADMIN"
+  --platform_wallet "$ADMIN_ADDRESS"
 ```
 
-### 5. Verify
+### Step 6: Verify Deployment
 ```bash
-soroban contract invoke \
+# Query contract pause status (should return false)
+stellar contract invoke \
   --id "$CONTRACT_ID" \
-  --source alice \
-  --network testnet \
-  -- get_auction_count
-
-soroban contract invoke \
-  --id "$CONTRACT_ID" \
-  --source alice \
+  --source deployer \
   --network testnet \
   -- is_paused
+
+# Query initial auction counter (should return 0)
+stellar contract invoke \
+  --id "$CONTRACT_ID" \
+  --source deployer \
+  --network testnet \
+  -- get_auction_count
 ```
 
-## Running the E2E Demo
+---
 
-```bash
-./deploy.sh --demo
+## 3. Backend & Services Configuration
+
+Set environment variables in `backend/.env`:
+
+```env
+PORT=4000
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=stellar_urithi_bidz
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=your_secure_password
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+CONTRACT_ID=<DEPLOYED_CONTRACT_ID>
+FRONTEND_URL=http://localhost:3000
+POLL_INTERVAL_MS=5000
 ```
 
-This creates an English auction with:
-- Reserve: 100 XLM
-- Royalty: 5%
-- Duration: ~1 hour
-
-## Environment Variables After Deploy
-
+Start the backend:
 ```bash
-# frontend/.env.local
-NEXT_PUBLIC_CONTRACT_ID=<your-contract-id>
+cd backend
+npm ci
+npm run build
+npm start
+```
+
+---
+
+## 4. Frontend & Custodian Portal Configuration
+
+In `frontend/.env.local`:
+```env
+NEXT_PUBLIC_CONTRACT_ID=<DEPLOYED_CONTRACT_ID>
 NEXT_PUBLIC_STELLAR_NETWORK=testnet
-
-# backend/.env
-CONTRACT_ID=<your-contract-id>
+NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_WS_URL=http://localhost:4000
+NEXT_PUBLIC_PINATA_GATEWAY=https://gateway.pinata.cloud
+PINATA_JWT=your_pinata_jwt_token
 ```
 
-## Docker Quick Start After Deploy
+In `custodian-portal/.env.local`:
+```env
+NEXT_PUBLIC_CONTRACT_ID=<DEPLOYED_CONTRACT_ID>
+NEXT_PUBLIC_STELLAR_NETWORK=testnet
+NEXT_PUBLIC_API_URL=http://localhost:4000
+NEXT_PUBLIC_PINATA_GATEWAY=https://gateway.pinata.cloud
+PINATA_JWT=your_pinata_jwt_token
+```
 
+Run both services:
 ```bash
-export CONTRACT_ID=<your-contract-id>
-export PINATA_JWT=<your-pinata-jwt>
-docker compose up --build
+# Frontend
+cd frontend && npm run build && npm start
+
+# Custodian Portal
+cd custodian-portal && npm run build && npm start
 ```
 
-- **Frontend:** http://localhost:3000
-- **Custodian Portal:** http://localhost:3001
-- **Backend API:** http://localhost:4000/api/health
+---
 
-## Contract Verification on Stellar Expert
+## 5. Mainnet Deployment Checklist
 
-Visit: `https://stellar.expert/explorer/testnet/contract/<CONTRACT_ID>`
-
-## Mainnet Deployment
-
-⚠️ **Use with extreme caution — this uses REAL XLM.**
-
-```bash
-./deploy.sh --mainnet
-```
-
-## Test Results Summary
-
-| Layer | Tests | Status |
-|-------|-------|--------|
-| Contracts | 16 | ✅ All pass |
-| Backend | 17 | ✅ All pass |
-| Frontend | 106 | ✅ All pass |
-| **Total** | **139** | **✅** |
-
-Built with ❤️ for African art and culture. Powered by Stellar.
+When deploying to Stellar Public Network (Mainnet):
+- [ ] Use a hardware wallet or multi-sig account for the Admin identity.
+- [ ] Ensure `max_royalty_bps` and `default_platform_fee_bps` parameters are aligned with platform governance.
+- [ ] Set `POSTGRES_SSL=true` and `NODE_ENV=production` on backend containers.
+- [ ] Set `NEXT_PUBLIC_STELLAR_NETWORK=mainnet` and RPC URL to `https://soroban.stellar.org`.
+- [ ] Verify contract WASM byte code with reproducible builds.
