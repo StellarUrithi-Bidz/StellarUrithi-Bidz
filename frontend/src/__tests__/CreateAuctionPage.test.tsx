@@ -3,6 +3,15 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import CreateAuctionPage from "@/app/create/page";
 
 // Mocks
+vi.mock("next/navigation", () => ({
+  useRouter: vi.fn(() => ({
+    push: vi.fn(),
+    refresh: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+  })),
+}));
+
 vi.mock("@/providers/wallet", () => ({
   useWallet: vi.fn(() => ({
     address: "GABCDEF1234567890ABCDEF1234567890ABCDEF",

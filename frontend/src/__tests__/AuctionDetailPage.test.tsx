@@ -183,10 +183,10 @@ describe("AuctionDetailPage", () => {
     });
   });
 
-  it("renders bidding panel with Place a Bid header", async () => {
+  it("renders bidding panel with Participation Panel header", async () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Place a Bid")).toBeInTheDocument();
+      expect(screen.getByText("Participation Panel")).toBeInTheDocument();
     });
   });
 
@@ -216,7 +216,7 @@ describe("AuctionDetailPage", () => {
     });
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Buy Now")).toBeInTheDocument();
+      expect(screen.getByText(/Buy Now/)).toBeInTheDocument();
     });
   });
 
@@ -387,9 +387,9 @@ describe("AuctionDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Settlement Breakdown")).toBeInTheDocument();
     }, { timeout: 3000 });
-    expect(screen.getByText("Seller gets:")).toBeInTheDocument();
-    expect(screen.getByText("Creator gets:")).toBeInTheDocument();
-    expect(screen.getByText("Platform gets:")).toBeInTheDocument();
+    expect(screen.getByText("Seller Proceeds:")).toBeInTheDocument();
+    expect(screen.getByText("Creator Royalty:")).toBeInTheDocument();
+    expect(screen.getByText("Platform Fee:")).toBeInTheDocument();
   });
 
   it("shows breadcrumb back link to auctions", async () => {
