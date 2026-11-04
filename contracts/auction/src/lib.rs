@@ -20,7 +20,7 @@ use soroban_sdk::{contract, contractimpl, token, Address, BytesN, Env};
 
 use types::{
     Auction, AuctionFormat, AuctionStatus::*, CreateAuctionParams, ItemType, PhysicalItem,
-    PlatformConfig, StorageKey::*,
+    PlatformConfig, StorageKey, StorageKey::*, PERSISTENT_BUMP_THRESHOLD, PERSISTENT_LIFETIME,
 };
 
 #[contract]
@@ -82,6 +82,13 @@ impl UrithiAuction {
         assert!(
             params.royalty_bps <= config.max_royalty_bps,
             "Royalty exceeds maximum allowed"
+        );
+        let total_fees_bps = params
+            .royalty_bps
+            .saturating_add(config.default_platform_fee_bps);
+        assert!(
+            total_fees_bps <= 10_000,
+            "Combined royalty and platform fee exceeds 100%"
         );
         assert!(params.start_time < params.end_time, "Invalid time range");
 
@@ -145,7 +152,14 @@ impl UrithiAuction {
             attested: false,
         };
 
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        // Persistent storage with TTL extension prevents ledger size exhaustion
+        let key = StorageKey::Auction(auction_id);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
 
         events::emit_auction_created(
             &env,
@@ -170,10 +184,11 @@ impl UrithiAuction {
     ) {
         custodian.require_auth();
 
+        let key = StorageKey::Auction(auction_id);
         let mut auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         match &auction.item {
@@ -190,16 +205,22 @@ impl UrithiAuction {
         auction.attested = true;
         auction.status = Active;
 
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
         events::emit_attestation_recorded(&env, auction_id, &custodian);
     }
 
     /// Activate a digital auction (no attestation needed).
     pub fn activate_auction(env: Env, auction_id: u64) {
+        let key = StorageKey::Auction(auction_id);
         let mut auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         auction.seller.require_auth();
@@ -220,15 +241,21 @@ impl UrithiAuction {
             "Cannot activate before start time"
         );
 
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
     }
 
     /// Cancel an auction before any bids are placed. Only the seller can cancel.
     pub fn cancel_auction(env: Env, auction_id: u64) {
+        let key = StorageKey::Auction(auction_id);
         let mut auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         auction.seller.require_auth();
@@ -240,16 +267,22 @@ impl UrithiAuction {
         assert!(auction.highest_bidder.is_none(), "Bids already placed");
 
         auction.status = Cancelled;
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
         events::emit_auction_cancelled(&env, auction_id, &auction.seller);
     }
 
     /// Approve the auction contract to transfer a digital NFT on the seller's behalf.
     pub fn approve_nft_transfer(env: Env, auction_id: u64) {
+        let key = StorageKey::Auction(auction_id);
         let auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         auction.seller.require_auth();
@@ -265,8 +298,9 @@ impl UrithiAuction {
         );
 
         let nft_client = token::Client::new(&env, &digital.nft_contract);
-        // expiration_ledger must fit in u32 for soroban-sdk v22
-        let expiration = auction.end_time.saturating_add(172800).min(u32::MAX as u64) as u32;
+        // Expiration ledger is sequence number (~5s/ledger), not Unix timestamp
+        let current_ledger = env.ledger().sequence();
+        let expiration = current_ledger.saturating_add(34_560); // ~2 days in ledgers
         nft_client.approve(
             &auction.seller,
             &env.current_contract_address(),
@@ -289,15 +323,16 @@ impl UrithiAuction {
     //  Bidding — Dutch
     // =========================================================================
 
-    pub fn buy_now(env: Env, auction_id: u64, buyer: Address) {
-        dutch::buy_now(&env, auction_id, &buyer);
+    pub fn buy_now(env: Env, auction_id: u64, buyer: Address, max_price: Option<i128>) {
+        dutch::buy_now(&env, auction_id, &buyer, max_price);
     }
 
     pub fn get_dutch_price(env: Env, auction_id: u64) -> i128 {
+        let key = StorageKey::Auction(auction_id);
         let auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
         dutch::get_current_price(&env, &auction)
     }
@@ -331,15 +366,53 @@ impl UrithiAuction {
     }
 
     // =========================================================================
+    //  Pull-Payment Refunds
+    // =========================================================================
+
+    /// Query claimable refund balance for a bidder on a specific auction.
+    pub fn get_claimable_refund(env: Env, auction_id: u64, bidder: Address) -> i128 {
+        let key = StorageKey::Refund(auction_id, bidder);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Withdraw claimable refund balance (pull pattern).
+    pub fn withdraw_refund(env: Env, auction_id: u64, bidder: Address) -> i128 {
+        bidder.require_auth();
+
+        let refund_key = StorageKey::Refund(auction_id, bidder.clone());
+        let refund_amount: i128 = env
+            .storage()
+            .persistent()
+            .get(&refund_key)
+            .unwrap_or(0);
+
+        assert!(refund_amount > 0, "No claimable refund");
+
+        let auction_key = StorageKey::Auction(auction_id);
+        let auction: Auction = env
+            .storage()
+            .persistent()
+            .get(&auction_key)
+            .unwrap_or_else(|| panic!("Auction not found"));
+
+        env.storage().persistent().remove(&refund_key);
+        escrow::refund_bid(&env, &auction.payment_token, &bidder, refund_amount);
+        events::emit_bid_refunded(&env, auction_id, &bidder, refund_amount);
+
+        refund_amount
+    }
+
+    // =========================================================================
     //  Auction Close & Settlement
     // =========================================================================
 
     /// Close an auction. Safe to call anytime — returns silently before end_time.
     pub fn close_auction(env: Env, auction_id: u64) {
+        let key = StorageKey::Auction(auction_id);
         let mut auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         if auction.status == Ended || auction.status == Settled || auction.status == Cancelled {
@@ -385,15 +458,21 @@ impl UrithiAuction {
             }
         }
 
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
     }
 
     /// Settle a closed auction: transfer NFT to winner, distribute proceeds.
     pub fn settle_auction(env: Env, auction_id: u64) {
+        let key = StorageKey::Auction(auction_id);
         let mut auction: Auction = env
             .storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"));
 
         assert!(auction.status == Ended, "Auction not in Ended state");
@@ -439,7 +518,12 @@ impl UrithiAuction {
         );
 
         auction.status = Settled;
-        env.storage().instance().set(&Auction(auction_id), &auction);
+        env.storage().persistent().set(&key, &auction);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_BUMP_THRESHOLD,
+            PERSISTENT_LIFETIME,
+        );
 
         events::emit_auction_settled(
             &env,
@@ -485,9 +569,10 @@ impl UrithiAuction {
     // =========================================================================
 
     pub fn get_auction(env: Env, auction_id: u64) -> Auction {
+        let key = StorageKey::Auction(auction_id);
         env.storage()
-            .instance()
-            .get(&Auction(auction_id))
+            .persistent()
+            .get(&key)
             .unwrap_or_else(|| panic!("Auction not found"))
     }
 
