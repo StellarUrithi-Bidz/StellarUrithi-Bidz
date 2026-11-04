@@ -30,7 +30,7 @@ export class AuctionDetailPage {
 
   async goto(auctionId: number = 42): Promise<void> {
     await this.page.goto(`/auctions/${auctionId}`);
-    await this.page.waitForLoadState("networkidle");
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   async getAuctionId(): Promise<string> {

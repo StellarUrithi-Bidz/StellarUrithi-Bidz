@@ -22,7 +22,7 @@ export class HomePage {
 
   async goto(): Promise<void> {
     await this.page.goto("/");
-    await this.page.waitForLoadState("networkidle");
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   async selectStatusFilter(status: string): Promise<void> {
@@ -35,7 +35,7 @@ export class HomePage {
 
   async clickFirstAuction(): Promise<void> {
     await this.auctionCards.first().click();
-    await this.page.waitForLoadState("networkidle");
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   async getAuctionCount(): Promise<number> {

@@ -39,6 +39,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const checkConnection = async () => {
     try {
+      if (typeof window !== "undefined" && (window as any).__mockFreighterState) {
+        const mock = (window as any).__mockFreighterState;
+        if (mock.isConnected) {
+          setAddress(mock.address);
+          setIsConnected(true);
+          return;
+        }
+      }
       const connected = await freighterIsConnected();
       if (connected && connected.isConnected) {
         const addr = await getAddress();
@@ -55,6 +63,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const connectWallet = useCallback(async () => {
     setIsConnecting(true);
     try {
+      if (typeof window !== "undefined" && (window as any).__mockFreighterState) {
+        const mock = (window as any).__mockFreighterState;
+        mock.isConnected = true;
+        setAddress(mock.address);
+        setIsConnected(true);
+        toast.success("Wallet connected!");
+        return;
+      }
       // Freighter v3: use requestAccess() to prompt connection
       await requestAccess();
       const addr = await getAddress();
@@ -78,6 +94,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnectWallet = useCallback(async () => {
     try {
+      if (typeof window !== "undefined" && (window as any).__mockFreighterState) {
+        const mock = (window as any).__mockFreighterState;
+        mock.isConnected = false;
+        setAddress(null);
+        setIsConnected(false);
+        toast.success("Wallet disconnected");
+        return;
+      }
       // Freighter v3: use setAllowed() to revoke access
       await setAllowed();
       setAddress(null);

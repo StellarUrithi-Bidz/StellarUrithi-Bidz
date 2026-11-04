@@ -15,7 +15,7 @@ test.describe("Home Page — Browsing & Filtering", () => {
 
   test("shows Connect Freighter button in navbar when wallet not connected", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("button:has-text('Connect Freighter')")).toBeVisible();
+    await expect(page.locator("button:has-text('Connect Freighter')").first()).toBeVisible();
   });
 
   test("filters auctions by status", async ({ page }) => {
@@ -75,10 +75,10 @@ test.describe("Home Page — Browsing & Filtering", () => {
   test("navbar has all navigation links", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.locator("text=Auctions")).toBeVisible();
-    await expect(page.locator("text=Create")).toBeVisible();
-    await expect(page.locator("text=My Bids")).toBeVisible();
-    await expect(page.locator("text=Admin")).toBeVisible();
+    await expect(page.locator("text=Auctions").first()).toBeVisible();
+    await expect(page.locator("text=Create").first()).toBeVisible();
+    await expect(page.locator("text=My Bids").first()).toBeVisible();
+    await expect(page.locator("text=Admin").first()).toBeVisible();
   });
 
   test("brand logo links back to home", async ({ page }) => {

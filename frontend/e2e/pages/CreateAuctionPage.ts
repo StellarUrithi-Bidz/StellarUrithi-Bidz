@@ -22,7 +22,7 @@ export class CreateAuctionPage {
 
   async goto(): Promise<void> {
     await this.page.goto("/create");
-    await this.page.waitForLoadState("networkidle");
+    await this.page.waitForLoadState("domcontentloaded");
   }
 
   // Step 1: Format selection

@@ -30,15 +30,15 @@ test.describe("Navigation & Routing", () => {
   test("footer has Stellar and GitHub links", async ({ page }) => {
     await page.goto("/");
 
-    await expect(page.locator("text=Stellar")).toBeVisible();
-    await expect(page.locator("text=Open Source")).toBeVisible();
+    await expect(page.locator("a:has-text('Stellar')").first()).toBeVisible();
+    await expect(page.locator("text=Open Source").first()).toBeVisible();
   });
 });
 
 test.describe("My Bids Page", () => {
   test("shows connect prompt when wallet not connected", async ({ page }) => {
     await page.goto("/my-bids");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Connect Your Wallet")).toBeVisible();
     await expect(page.locator("text=Connect Freighter to view your bid history.")).toBeVisible();
@@ -47,7 +47,7 @@ test.describe("My Bids Page", () => {
   test("shows bid history when wallet is connected", async ({ page }) => {
     await mockConnectedWallet(page);
     await page.goto("/my-bids");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1500);
 
     // Page title should be visible
@@ -58,7 +58,7 @@ test.describe("My Bids Page", () => {
   test("empty state shows Browse Auctions link when no bids", async ({ page }) => {
     await mockConnectedWallet(page);
     await page.goto("/my-bids");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1500);
 
     // Either shows bids or empty state with Browse Auctions link
@@ -74,7 +74,7 @@ test.describe("My Bids Page", () => {
 test.describe("Admin Panel", () => {
   test("shows connect prompt when wallet not connected", async ({ page }) => {
     await page.goto("/admin");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     await expect(page.locator("text=Admin Access")).toBeVisible();
     await expect(page.locator("text=Connect Freighter wallet to access admin panel.")).toBeVisible();
@@ -83,7 +83,7 @@ test.describe("Admin Panel", () => {
   test("shows admin panel with platform settings when connected", async ({ page }) => {
     await mockConnectedWallet(page);
     await page.goto("/admin");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1000);
 
     await expect(page.locator("text=Admin Panel")).toBeVisible();
@@ -136,7 +136,7 @@ test.describe("Full User Flow — Browse → Detail → Back", () => {
 
     // 1. Start on home page
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(1500);
 
     // 2. Check for auction cards
@@ -146,7 +146,7 @@ test.describe("Full User Flow — Browse → Detail → Back", () => {
     if (cardCount > 0) {
       // 3. Click first auction card
       await cards.first().click();
-      await page.waitForLoadState("networkidle");
+      await page.waitForLoadState("domcontentloaded");
       await page.waitForTimeout(1000);
 
       // 4. Verify we're on a detail page
@@ -168,7 +168,7 @@ test.describe("Create Auction → Verify Summary Flow", () => {
 
     // 1. Navigate to create page
     await page.goto("/create");
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("domcontentloaded");
 
     // 2. Select English format and go to step 2
     await page.locator("button").filter({ hasText: "Continue →" }).click();

@@ -35,12 +35,14 @@ test.describe("Auction Detail — Display & Status", () => {
 
     await page.waitForTimeout(1500);
 
-    // Check if Place a Bid or appropriate panel is shown
+    // Check if Place a Bid, Participation Panel, or appropriate panel is shown
     const placeBid = page.locator("text=Place a Bid");
+    const participation = page.locator("text=Participation Panel");
     const ended = page.locator("text=Auction ended");
     const settled = page.locator("text=Auction settled");
 
     const hasBidPanel = (await placeBid.isVisible().catch(() => false)) ||
+      (await participation.isVisible().catch(() => false)) ||
       (await ended.isVisible().catch(() => false)) ||
       (await settled.isVisible().catch(() => false));
 

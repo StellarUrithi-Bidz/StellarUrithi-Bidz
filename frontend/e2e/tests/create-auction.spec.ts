@@ -10,7 +10,7 @@ test.describe("Create Auction — Wallet Gating", () => {
 
     await expect(page.locator("text=Connect Your Wallet")).toBeVisible();
     await expect(page.locator("text=Connect Freighter to create an auction listing.")).toBeVisible();
-    await expect(page.locator("button:has-text('Connect Freighter')")).toBeVisible();
+    await expect(page.locator("button:has-text('Connect Freighter')").first()).toBeVisible();
   });
 });
 

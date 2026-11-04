@@ -32,6 +32,10 @@ export async function mockConnectedWallet(
   await page.addInitScript((walletState) => {
     // Mock window.freighter for contract signing
     (window as any).freighter = {
+      isConnected: async () => ({ isConnected: walletState.isConnected }),
+      getAddress: async () => ({ address: walletState.address }),
+      requestAccess: async () => ({ address: walletState.address }),
+      setAllowed: async () => true,
       signTransaction: async (xdr: string) => ({
         signedTxXdr: `mock-signed-${xdr.slice(0, 8)}`,
       }),
@@ -41,6 +45,8 @@ export async function mockConnectedWallet(
         return btoa(sig);
       },
     };
+
+    (window as any).freighterApi = (window as any).freighter;
 
     // Mock @stellar/freighter-api module responses
     // This is set up as a global that the WalletProvider reads
@@ -57,7 +63,7 @@ export async function mockConnectedWallet(
  */
 export async function navigateTo(page: Page, path: string): Promise<void> {
   await page.goto(path);
-  await page.waitForLoadState("networkidle");
+  await page.waitForLoadState("domcontentloaded");
 }
 
 /**
