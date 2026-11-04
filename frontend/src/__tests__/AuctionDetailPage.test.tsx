@@ -57,6 +57,9 @@ vi.mock("lucide-react", () => ({
   Loader2: () => <span data-testid="icon-loader" />,
   CheckCircle: () => <span data-testid="icon-check" />,
   XCircle: () => <span data-testid="icon-x-circle" />,
+  RefreshCw: () => <span data-testid="icon-refresh" />,
+  KeyRound: () => <span data-testid="icon-key" />,
+  AlertCircle: () => <span data-testid="icon-alert" />,
 }));
 
 import { getAuction, getBidsForAuction } from "@/lib/api";
