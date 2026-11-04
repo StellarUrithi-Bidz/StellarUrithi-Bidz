@@ -33,7 +33,6 @@ jobs:
   deploy-frontend:
     name: Deploy Frontend
     runs-on: ubuntu-latest
-    if: ${{ secrets.VERCEL_TOKEN != '' }}
     timeout-minutes: 15
     environment:
       name: Production
@@ -43,7 +42,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Vercel Token
+        id: check_token
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "::warning::VERCEL_TOKEN is not configured in repository secrets. Skipping Vercel deployment."
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.check_token.outputs.has_token == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -51,10 +61,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Install dependencies
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: frontend
         run: npm ci
 
       - name: Pull Vercel Environment
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: frontend
         run: |
           npx vercel pull --yes \
@@ -62,12 +74,14 @@ jobs:
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build on Vercel
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: frontend
         run: |
           npx vercel build --prod \
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy to Vercel (Production)
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: frontend
         run: |
           npx vercel deploy --prebuilt --prod \
@@ -79,7 +93,6 @@ jobs:
   deploy-custodian:
     name: Deploy Custodian Portal
     runs-on: ubuntu-latest
-    if: ${{ secrets.VERCEL_TOKEN != '' }}
     timeout-minutes: 15
     environment:
       name: Production
@@ -89,7 +102,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate Vercel Token
+        id: check_token
+        run: |
+          if [ -z "${{ secrets.VERCEL_TOKEN }}" ]; then
+            echo "::warning::VERCEL_TOKEN is not configured in repository secrets. Skipping Vercel deployment."
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup Node.js
+        if: steps.check_token.outputs.has_token == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -97,10 +121,12 @@ jobs:
           cache-dependency-path: custodian-portal/package-lock.json
 
       - name: Install dependencies
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: custodian-portal
         run: npm ci
 
       - name: Pull Vercel Environment
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: custodian-portal
         run: |
           npx vercel pull --yes \
@@ -108,12 +134,14 @@ jobs:
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build on Vercel
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: custodian-portal
         run: |
           npx vercel build --prod \
             --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy to Vercel (Production)
+        if: steps.check_token.outputs.has_token == 'true'
         working-directory: custodian-portal
         run: |
           npx vercel deploy --prebuilt --prod \

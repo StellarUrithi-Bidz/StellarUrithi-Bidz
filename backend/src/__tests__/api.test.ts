@@ -77,9 +77,14 @@ describe("Auction API Routes", () => {
     expect(res.body.data.total_auctions).toBe(10);
   });
 
+  const testSeller = Keypair.random().publicKey();
+  const testCreator = Keypair.random().publicKey();
+  const testBidder = Keypair.random().publicKey();
+
   it("POST /api/simulate-create validates valid fee configuration", async () => {
     const res = await request(app).post("/api/simulate-create").send({
-      seller: "GBZXN7PIRZGNMHGA728V3U2D5KOCG6YQ5QU55GU2TVGNM3456789ABCD",
+      seller: testSeller,
+      original_creator: testCreator,
       format: "english",
       item_type: "digital",
       payment_token: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
@@ -98,7 +103,8 @@ describe("Auction API Routes", () => {
 
   it("POST /api/simulate-create rejects combined fee overflow > 10,000 bps", async () => {
     const res = await request(app).post("/api/simulate-create").send({
-      seller: "GBZXN7PIRZGNMHGA728V3U2D5KOCG6YQ5QU55GU2TVGNM3456789ABCD",
+      seller: testSeller,
+      original_creator: testCreator,
       format: "english",
       item_type: "digital",
       payment_token: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
@@ -116,8 +122,9 @@ describe("Auction API Routes", () => {
 
   it("POST /api/:id/simulate-bid rejects bids below minimum increment", async () => {
     const res = await request(app).post("/api/1/simulate-bid").send({
-      bidder: "GBZXN7PIRZGNMHGA728V3U2D5KOCG6YQ5QU55GU2TVGNM3456789ABCD",
+      bidder: testBidder,
       bid_amount: "155", // Highest is 150, min increment is 10, requires 160
+      format: "english",
     });
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("Bid too low");
@@ -125,8 +132,9 @@ describe("Auction API Routes", () => {
 
   it("POST /api/:id/simulate-bid accepts bids meeting increment", async () => {
     const res = await request(app).post("/api/1/simulate-bid").send({
-      bidder: "GBZXN7PIRZGNMHGA728V3U2D5KOCG6YQ5QU55GU2TVGNM3456789ABCD",
+      bidder: testBidder,
       bid_amount: "165",
+      format: "english",
     });
     expect(res.status).toBe(200);
     expect(res.body.simulation.valid).toBe(true);
