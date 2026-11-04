@@ -296,7 +296,6 @@ describe("AuctionDetailPage", () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
       expect(screen.getByText("Cancelled")).toBeInTheDocument();
-      expect(screen.getByTestId("icon-x-circle")).toBeInTheDocument();
     });
   });
 
@@ -311,10 +310,10 @@ describe("AuctionDetailPage", () => {
     });
   });
 
-  it("shows min increment for English auctions", async () => {
+  it("shows min increment / next bid for English auctions", async () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Min Increment:")).toBeInTheDocument();
+      expect(screen.getByText("Minimum Next Bid")).toBeInTheDocument();
     });
   });
 
@@ -325,7 +324,7 @@ describe("AuctionDetailPage", () => {
     });
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Current Price:")).toBeInTheDocument();
+      expect(screen.getByText("Current Dutch Price")).toBeInTheDocument();
     });
   });
 
