@@ -81,6 +81,7 @@ services:
           memory: 128M
     ports:
       - "4000:4000"
+    command: ["npm", "run", "dev"]
     environment:
       # Server
       PORT: "4000"
@@ -141,6 +142,7 @@ services:
           memory: 256M
     ports:
       - "3000:3000"
+    command: ["npm", "run", "dev"]
     environment:
       NODE_ENV: development
       # Stellar
@@ -195,6 +197,7 @@ services:
           memory: 128M
     ports:
       - "3001:3001"
+    command: ["npm", "run", "dev"]
     environment:
       NODE_ENV: development
       # Stellar
