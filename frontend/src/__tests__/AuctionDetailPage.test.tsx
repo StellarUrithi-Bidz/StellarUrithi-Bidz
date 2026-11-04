@@ -198,14 +198,15 @@ describe("AuctionDetailPage", () => {
     });
   });
 
-  it("shows Connect Wallet to Bid when not connected", async () => {
+  it("disables bid button when not connected", async () => {
     vi.mocked(useWallet).mockReturnValue({
       address: null, isConnected: false, isConnecting: false,
       connectWallet: vi.fn(), disconnectWallet: vi.fn(), signAuthMessage: vi.fn(), network: "testnet",
     });
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Connect Wallet to Bid")).toBeInTheDocument();
+      const button = screen.getByRole("button", { name: /Place Bid/i });
+      expect(button).toBeDisabled();
     });
   });
 
@@ -234,7 +235,7 @@ describe("AuctionDetailPage", () => {
   it("shows WebSocket status indicator", async () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("○ Connecting...")).toBeInTheDocument();
+      expect(screen.getByText(/Real-time connecting/i)).toBeInTheDocument();
     });
   });
 
@@ -351,14 +352,14 @@ describe("AuctionDetailPage", () => {
     });
   });
 
-  it("shows Your Bid Amount label for sealed_bid auctions", async () => {
+  it("shows Commit-Reveal Mode for sealed_bid auctions", async () => {
     vi.mocked(getAuction).mockResolvedValue({
       success: true,
       data: mockAuction({ format: "sealed_bid" }) as never,
     });
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText("Your Bid Amount")).toBeInTheDocument();
+      expect(screen.getByText("Commit-Reveal Mode")).toBeInTheDocument();
     });
   });
 
