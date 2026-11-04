@@ -150,9 +150,7 @@ describe("AuctionDetailPage", () => {
     });
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      // "No bids yet" appears twice: in price area and bid history
-      const elements = screen.getAllByText("No bids yet");
-      expect(elements.length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByText("No bids yet")).toBeInTheDocument();
     });
   });
 
@@ -195,7 +193,7 @@ describe("AuctionDetailPage", () => {
   it("renders bid input field for English auctions", async () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      const input = screen.getByPlaceholderText("Enter bid amount in stroops");
+      const input = screen.getByPlaceholderText("Enter bid amount");
       expect(input).toBeInTheDocument();
     });
   });
@@ -340,7 +338,7 @@ describe("AuctionDetailPage", () => {
   it("accepts bid amount input changes", async () => {
     render(<AuctionDetailPage />);
     await waitFor(() => {
-      const input = screen.getByPlaceholderText("Enter bid amount in stroops") as HTMLInputElement;
+      const input = screen.getByPlaceholderText("Enter bid amount") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "500" } });
       expect(input.value).toBe("500");
     });
